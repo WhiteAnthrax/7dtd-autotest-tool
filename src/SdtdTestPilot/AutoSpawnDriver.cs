@@ -75,7 +75,14 @@ internal static class AutoSpawnDriver
     private static bool IsClientUiReady()
     {
         LocalPlayerUI ui = LocalPlayerUI.GetUIForPrimaryPlayer();
+#if GAME_V26
+        // XUi's readiness flag is the lowercase field `isReady` on 7DTD v2.6 (confirmed by
+        // decompiling XUiC_SpawnSelectionWindow.updateLoadState() against v2.6 b14); 3.0
+        // renamed it to the PascalCase property `IsReady`.
+        return ui != null && ui.xui != null && ui.xui.isReady;
+#else
         return ui != null && ui.xui != null && ui.xui.IsReady;
+#endif
     }
 }
 #endif

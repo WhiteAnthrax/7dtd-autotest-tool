@@ -35,9 +35,17 @@
 .PARAMETER SkipTests
     Skip "dotnet test" for SdtdTestPilot.Tests.
 
+.PARAMETER GameFlavor
+    Which game-version-specific API shape to compile against: 'v3' (7DTD 3.0, default) or
+    'v26' (7DTD v2.6, where a handful of API members differ - see AutoSpawnDriver.cs).
+
 .EXAMPLE
     powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File Invoke-TestPilotBuild.ps1 `
         -GamePath 'D:\GAMES\7D2D\Custom\3.0Vanilla' -ClientModsDir 'D:\GAMES\7D2D\Custom\3.0Vanilla\Mods'
+
+.EXAMPLE
+    powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File Invoke-TestPilotBuild.ps1 `
+        -GamePath 'D:\GAMES\7D2D\v2\The_Wasteland\The_Wasteland' -GameFlavor v26
 #>
 [CmdletBinding()]
 param(
@@ -47,7 +55,9 @@ param(
     [string]$Configuration = 'Debug',
     [string]$DotNetPath = $(if ($env:VTT_DOTNET_PATH) { $env:VTT_DOTNET_PATH } else { 'dotnet' }),
     [string]$ClientModsDir,
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [ValidateSet('v3', 'v26')]
+    [string]$GameFlavor = 'v3'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -132,8 +142,8 @@ foreach ($reference in $referencePlan) {
     Write-Log "Copied game reference: $($reference.Name)"
 }
 
-Write-Log "Building SdtdTestPilot ($Configuration)..."
-& $DotNetPath build $projectPath -c $Configuration
+Write-Log "Building SdtdTestPilot ($Configuration, GameFlavor=$GameFlavor)..."
+& $DotNetPath build $projectPath -c $Configuration "-p:GameFlavor=$GameFlavor"
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet build failed with exit code $LASTEXITCODE."
 }

@@ -19,6 +19,18 @@
   </PropertyGroup>
 
   <!--
+    GameFlavor selects which game-version-specific API shape to compile against (see
+    AutoSpawnDriver.cs). Pass -p:GameFlavor=v26 when building against a 7DTD v2.6 GamePath;
+    omit it (or pass v3, the default) for 7DTD 3.0.
+  -->
+  <PropertyGroup>
+    <GameFlavor Condition="'$(GameFlavor)'==''">v3</GameFlavor>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(GameFlavor)'=='v26'">
+    <DefineConstants>$(DefineConstants);GAME_V26</DefineConstants>
+  </PropertyGroup>
+
+  <!--
     SdtdTestPilot.Core holds the engine-free subset of this mod's logic (option parsing, queue
     file naming, result JSON) so it can be unit-tested without the proprietary game assemblies
     below. Sources are compiled directly into this project, mirroring VisitedTraderTeleport's
