@@ -96,11 +96,17 @@ have to be dealt with for a truly unattended run:
   are read-only once the game has finished parsing its command line — so pass it explicitly
   every time you launch for testing.
 - **Spawn confirmation** ("Ready to spawn?" / "Random Spawn"). This one *is* handled
-  automatically: `WorldReadyWait` calls `AutoSpawnDriver.RequestSpawnIfNeeded()` on every poll
-  tick while waiting for the primary player to exist. It does exactly what the "Spawn"/"Random
-  Spawn" button does internally — `GameManager.canSpawnPlayer = true` on a host/server,
-  `GameManager.RequestToSpawn()` on a remote client (confirmed by decompiling
-  `XUiC_SpawnSelectionWindow.SpawnButtonPressed`) — but only once the client is actually ready.
+  automatically, via two mechanisms:
+  - `HostLoadDriver` sets `GamePrefs.SkipSpawnButton = true` before calling `StartServers`. On a
+    host/server, `GameManager.startGameCo` only opens `XUiC_SpawnSelectionWindow` and waits on
+    `canSpawnPlayer` when this pref is false (confirmed by decompiling `GameManager`), so this
+    avoids the prompt from ever appearing for `hostload` mode.
+  - For a remote client — where there's no server-side pref to set — `WorldReadyWait` calls
+    `AutoSpawnDriver.RequestSpawnIfNeeded()` on every poll tick while waiting for the primary
+    player to exist. It does exactly what the "Spawn"/"Random Spawn" button does internally —
+    `GameManager.RequestToSpawn()` (confirmed by decompiling
+    `XUiC_SpawnSelectionWindow.SpawnButtonPressed`) — but only once the client is actually
+    ready.
   Requesting a spawn too early crashes `EntityPlayerLocal.Init` on the incoming
   `NetPackagePlayerId` (observed: `NullReferenceException` in `SetFirstPersonView`, from
   `characterMatrixOverride` not being wired up yet) and gets the client disconnected. A UI-ready
