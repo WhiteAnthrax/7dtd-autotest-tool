@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<xml>
+  <Name value="SdtdTestPilot" />
+  <DisplayName value="Sdtd Test Pilot (Headless Test Driver)" />
+  <Description value="Test-only mod. Auto-connects or auto-hosts on startup via -testpilot.* command-line flags, then executes console commands injected via local files. Never install on a real/public server." />
+  <Author value="WhiteAnthrax" />
+  <Version value="0.1.0" />
+  <Website value="" />
+  <SkipWithAntiCheat value="true" />
+</xml>
