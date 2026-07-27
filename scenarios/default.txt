@@ -1,0 +1,16 @@
+# Default roundtrip scenario, run by bin/05-run-scenario.sh.
+#
+# This isn't parsed as a script (record/teleport keys depend on each command's own
+# output, which a flat command list can't express - see bin/05-run-scenario.sh for the
+# actual logic). It documents the sequence bin/05-run-scenario.sh runs:
+#
+#   1. le                                    - list nearby entities
+#   2. se <playerId> <traderClass> 1         - spawn a trader if none are nearby
+#   3. le                                    - re-list to find the trader's entity id
+#   4. vtttest record <traderEntityId>       - record a visit; canonicalized key ignored here
+#   5. vtttest list                          - get the canonicalized destination key
+#   6. vtttest teleport <destinationKey>     - teleport to a *different* recorded destination
+#   7. le                                    - confirm the player's position moved
+#
+# To add a custom scenario, add a new .txt file here for documentation purposes and
+# extend bin/05-run-scenario.sh's logic to match - there's no separate interpreter yet.

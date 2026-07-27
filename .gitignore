@@ -1,0 +1,23 @@
+# .NET build outputs (scoped to project subdirectories only - bin/ at the
+# repo root holds this project's orchestration scripts, not build output)
+src/*/bin/
+src/*/obj/
+tests/*/bin/
+tests/*/obj/
+*.user
+*.suo
+
+# Generated build/package outputs
+mod/SdtdTestPilot/*.dll
+
+# Local copies of 7 Days to Die assemblies/config used only for compilation
+# and API inspection. Do not redistribute these game files.
+refs/*
+!refs/README.md
+
+# Environment-specific profile config (real values; commit only *.env.example)
+config/*.env
+!config/*.env.example
+
+# Runtime artifacts from test runs (logs, command-queue captures, etc.)
+output/
