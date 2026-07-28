@@ -118,6 +118,12 @@ The images come from `GameUtils.TakeScreenShot`, which reads the framebuffer aft
 what the game writes; the game appends the extension itself, which is why the console
 command takes a path *without* one.
 
+Expect two solid black rectangles in the top-right corner of every capture. They are in
+the vanilla HUD area, appear identically in shots taken before the mod's dialog is ever
+opened, and are a known artifact of reading the framebuffer this way (that read doesn't
+pick up separately-rendered textures). Nothing to do with `VisitedTraderTeleport` - don't
+spend time chasing them.
+
 ## Known manual steps
 
 - **Discord login prompt**: handled automatically - no manual step needed.
