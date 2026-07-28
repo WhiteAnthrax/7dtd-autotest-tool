@@ -326,3 +326,70 @@ packages of the same release carry different build numbers (`3.1.0 (b13)` on bot
 but that is not guaranteed), while the compatibility version is the field the game itself
 matches on. Only a confirmed mismatch is fatal - an unreadable version warns and
 continues, so the check cannot block a run that would otherwise work.
+
+## Deploying only the DLL means config changes are never actually tested
+
+`03-deploy-mods.sh` used to copy `VisitedTraderTeleport.dll` and nothing else, on top of
+whatever mod folder the client and server already had installed. That folder carries the
+mod's `Config/` - `Localization.csv`, `dialogs.xml`, `VisitedTraderTeleport.xml` - so a run
+testing a localization or dialog change loaded the *previously installed* copy of those
+files and passed without the change ever being in play.
+
+Worse than a plain false negative: the run is green, the change looks verified, and the
+only symptom is that nothing you changed shows up. The deploy now ships `Config/` from the
+build tree alongside the DLL (collected into `output/<profile>/mod-config/` by
+`02-build-mods.sh`, so what is deployed is exactly what was built), and teardown restores
+the client's original copy.
+
+The general rule: whatever the mod loads at runtime has to be deployed, not just the part
+that happens to be the build output.
+
+## A dialog that is logically correct can still reach the screen truncated
+
+`XUiC_DialogResponseList` has a fixed number of `XUiC_DialogResponseEntry` children, built
+from the dialog skin's XML. `Update` walks the responses `GetResponses` returned and
+assigns them to those slots - and everything past the last slot is dropped, with no log
+line and no error. A mod that inserts its own entries (a status header, five destinations,
+a paging row) can therefore produce a perfectly correct list that a player sees cut off.
+
+No data-level check catches this, because the data is right. `vtttest dialog dump` reports
+both counts - what `GetResponses` produced and how many slots actually hold a response -
+and `06-verify.sh` fails when they disagree. The screenshots are the backstop for the rest
+of the rendering (clipping, wrapping, panel overflow), which no assertion can see.
+
+## Seeding the client's destination list races the snapshot the dialog itself requests
+
+`vtttest dialog seed` writes synthetic destinations into the client's snapshot cache so
+paging can be tested without visiting six traders. But `DialogGetFirstStatementPatch`
+calls `RequestSnapshot()` every time the dialog opens, and the server's reply calls
+`ApplySnapshot`, replacing whatever was seeded.
+
+Seeding before opening the dialog therefore loses to the server's own (much shorter) list,
+non-deterministically - a race that would look like "paging is broken" rather than "the
+test seeded at the wrong time". Seed *after* `dialog open`, once that request has already
+been answered.
+
+## The queue result came back mojibake, and jq died 1000 bytes in
+
+The first dialog-scenario run failed with `jq: exit 5` and a half-printed dump full of
+`こんにちは、何かご用ですか?E` style garbage. Nothing was wrong with the mod, the dialog,
+or the JSON: `SdtdTestPilot` writes its result files as UTF-8 without a BOM
+(`AtomicFileWriter`), and `CommandResultJson` escapes them correctly.
+
+The damage happened on the way back. `Invoke-TestPilotCmd.ps1` read the file with
+`Get-Content -Raw`, and PowerShell 5.1 reads a BOM-less file using the **ANSI code page** -
+CP932 on this Japanese-locale Windows host. Whatever survived that was then re-encoded a
+second time through `[Console]::OutputEncoding` on its way to stdout and over SSH. The
+result was a byte stream that is no longer valid UTF-8, so `jq` parsed until it hit the
+first bad byte and exited - which looks exactly like a truncated response, and sent the
+first diagnosis chasing a nonexistent output-length limit in `SdtdConsole.Output`.
+
+Two things worth keeping:
+
+- **An ASCII-only test suite hides this indefinitely.** Every earlier scenario dealt in
+  destination keys like `traderbob:902:968`. The encoding bug had always been there; it
+  only surfaced the first time a test read text a human would actually see.
+- **Fix the transport, not the encoding settings.** `Invoke-TestPilotCmd.ps1` now returns
+  `B64 <base64 of the file's bytes>` and `testpilot_submit` decodes it, which is immune to
+  the locale and console encoding of both machines. Setting `-Encoding UTF8` on the read
+  would have fixed only the first of the two re-encodings.

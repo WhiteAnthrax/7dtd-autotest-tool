@@ -18,6 +18,30 @@ together and are usually used together:
    command queue, check the result against server-side save data, then restore
    everything.
 
+## Why the dialog is driven through the real UI, not a stand-in
+
+The roundtrip scenario (`05`) calls the mod's service layer directly, which keeps it fast
+and independent of the UI - but it also means the part of the mod a player actually looks
+at was never executed. Everything in `DialogPatches.cs` (paging, response text, the status
+header, the XUi binding) ran zero times during a green run.
+
+The dialog scenario (`05b`) closes that by opening the game's own dialog window group and
+activating responses the same way a click does, rather than reimplementing the flow. That
+choice matters: a stand-in that calls `GetResponses` itself would verify the mod's logic
+while quietly skipping the layer where the logic meets the game - which is exactly where
+the interesting failures live (a response list with fewer slots than entries, a statement
+the skin doesn't render, a localization key that resolves in code but not in the UI).
+
+Two things follow:
+
+- **Assertions cover what is decidable; screenshots cover the rest.** Paging boundaries,
+  dropped entries and unresolved keys are checked mechanically. Clipping, wrapping and
+  layout are not decidable from data, so the run keeps images instead and leaves the
+  judgement to a human.
+- **The test harness lives in the mod under test, the generic parts here.** `vtttest
+  dialog` needs `VisitedTraderTeleport`'s internals, so it ships there (Debug-only);
+  screenshots are useful to any mod, so `testpilot screenshot` lives in `SdtdTestPilot`.
+
 ## Why each run starts from known state
 
 Early versions of this tool reused whatever world the Docker server already had. Two

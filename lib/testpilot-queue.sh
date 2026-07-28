@@ -26,12 +26,24 @@ testpilot_wait_ready() {
 
 # testpilot_submit <id> <command text>: submits one console command through the queue
 # and prints the single-line result JSON to stdout.
+#
+# Invoke-TestPilotCmd.ps1 hands the result back base64-encoded ("B64 <payload>") so the
+# game's own UTF-8 bytes survive the Japanese-locale Windows host and the SSH hop intact -
+# see the comment in that script. Anything else (notably "TIMEOUT ...") is passed through
+# unchanged so callers can keep matching on it.
 testpilot_submit() {
     require_var OMEN_QUEUE_DIR
     local id="$1"
     local command="$2"
-    run_on_omen_script "$LIB_DIR/windows/Invoke-TestPilotCmd.ps1" \
-        -Id "$id" -Command "\"$command\"" -QueueDir "\"$OMEN_QUEUE_DIR\""
+    local raw
+    raw="$(run_on_omen_script "$LIB_DIR/windows/Invoke-TestPilotCmd.ps1" \
+        -Id "$id" -Command "\"$command\"" -QueueDir "\"$OMEN_QUEUE_DIR\"")"
+
+    if printf '%s' "$raw" | grep -q '^B64 '; then
+        printf '%s' "$raw" | grep '^B64 ' | head -1 | cut -d' ' -f2- | tr -d '\r\n ' | base64 -d
+    else
+        printf '%s' "$raw"
+    fi
 }
 
 # next_id: a nanosecond timestamp, not an incrementing counter. submit_and_check calls

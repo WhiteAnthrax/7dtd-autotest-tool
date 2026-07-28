@@ -170,6 +170,30 @@ Result file (`out/00000001.result`): single-line JSON, e.g.
 output indicates success — for `vtttest` specifically, check its own `VTT_TEST_RESULT` JSON
 marker inside `output` (see `docs/GameBehaviorTesting.md`).
 
+## The `testpilot` console command
+
+The mod also registers one console command of its own, for driver-side actions that have to
+happen inside the game process but belong to no particular mod under test. It is gated on
+the same `EnableTestPilot.txt` marker file as everything else here.
+
+| Command | Effect |
+|---|---|
+| `testpilot screenshot <path without extension>` | Captures the client's screen to `<path>.jpg`. |
+
+It calls `GameUtils.TakeScreenShot(EScreenshotMode.File, path)`, which reads the framebuffer
+after `WaitForEndOfFrame` — so the capture includes every open UI window, which is the point.
+Two things follow from how the game implements it:
+
+- **The path must not carry an extension.** The game appends `.jpg` itself. The command
+  rejects a path ending in `.jpg`/`.png` rather than producing `foo.png.jpg`.
+- **The file does not exist when the command returns.** The capture is a coroutine, so it
+  completes some frames later. The emitted `TESTPILOT_RESULT` marker carries the final path;
+  a driver must poll for it (`lib/ssh-omen.sh`'s `wait_for_omen_file` does this).
+
+```
+TESTPILOT_RESULT {"action":"screenshot","ok":true,"detail":"C:\\scratch\\screenshots\\page1.jpg"}
+```
+
 ## Typical usage with vtttest
 
 1. Launch the client with `-testpilot.mode=connect ...` pointed at a Docker dedicated server

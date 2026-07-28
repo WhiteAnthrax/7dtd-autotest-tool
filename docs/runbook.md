@@ -70,7 +70,8 @@ Each stage is a standalone script; run them in order with the same profile:
 ./bin/03-deploy-mods.sh v3       # back up + deploy both mods, reset visit history, restart server
 ./bin/04-launch-client.sh v3     # launch the client (scheduled task), wait for READY
 ./bin/05-run-scenario.sh v3      # drive the vtttest scenario through the command queue
-./bin/06-verify.sh v3            # cross-check the scenario result against server-side data
+./bin/05b-run-dialog-scenario.sh v3  # walk the real trader dialog, capture screenshots
+./bin/06-verify.sh v3            # check the scenario result against server data + the dialog
 ./bin/07-teardown.sh v3          # restore both mods + visit history, stop client, stop server
 ```
 
@@ -86,11 +87,36 @@ TESTPILOT_KEEP_SAVE=1 ./bin/07-teardown.sh v3        # keep it, as --keep-save
 rewrites `GameName`); the later stages pick the save up from the state file it writes, so
 they need no environment of their own.
 
-`output/<profile>/` accumulates build artifacts (`*.debug.dll`), backups
+`05b` depends on `05`: it reuses the trader `05` already spawned and recorded, so the
+dialog walkthrough doesn't add a visit of its own and change the data `06` checks.
+
+`output/<profile>/` accumulates build artifacts (`*.debug.dll`, `mod-config/`), backups
 (`server-mod-backup/`, `server-data-backup.json`), and results
-(`scenario-result.json`, `verify-result.json`) - useful for post-mortem inspection.
-`07-teardown.sh` doesn't delete this directory, only the client-side scratch/queue dirs
-on the Windows host.
+(`scenario-result.json`, `dialog-result.json`, `verify-result.json`, `screenshots/`) -
+useful for post-mortem inspection. `07-teardown.sh` doesn't delete this directory, only
+the client-side scratch/queue dirs on the Windows host.
+
+### Screenshots as evidence
+
+`05b-run-dialog-scenario.sh` captures what the client actually drew at each step into
+`output/<profile>/screenshots/`:
+
+| File | Shows |
+|---|---|
+| `01-dialog-start.jpg` | The trader's opening screen with the mod's travel option. |
+| `02-destinations-page1.jpg` | Destination list, page 1 of 2 (5 entries + a next-page row). |
+| `03-destinations-page2.jpg` | Page 2 (the remaining 2 entries + a previous-page row). |
+| `04-destinations-page1-again.jpg` | Back on page 1, to show paging back works. |
+
+These are the one thing the assertions cannot cover: text that is clipped, wrapped or
+pushed out of the panel is still perfectly correct data. Look at them when changing any
+response text, and especially after a localization change - German and Russian run
+noticeably longer than English.
+
+The images come from `GameUtils.TakeScreenShot`, which reads the framebuffer after
+`WaitForEndOfFrame` and so includes every open UI window. They are JPEGs because that is
+what the game writes; the game appends the extension itself, which is why the console
+command takes a path *without* one.
 
 ## Known manual steps
 
