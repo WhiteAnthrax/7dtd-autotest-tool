@@ -11,6 +11,9 @@ source "$ROOT_DIR/lib/common.sh"
 # shellcheck source=lib/ssh-omen.sh
 source "$ROOT_DIR/lib/ssh-omen.sh"
 
+# Surface `set -e` failures instead of exiting silently (see lib/common.sh).
+trace_errors
+
 [ $# -eq 1 ] || die "usage: $0 <profile>"
 PROFILE="$1"
 load_profile "$PROFILE"

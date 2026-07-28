@@ -99,4 +99,39 @@ docker_server_restart || log "warn: failed to restart Docker server (continuing)
 docker_server_wait_mod_loaded 60 || log "warn: mod-loaded confirmation after restore failed (continuing)"
 docker_server_stop || log "warn: failed to stop Docker server"
 
+# --- Server: undo --fresh-save (config first, then the throwaway save itself) ---
+# Deliberately after the server has stopped, so nothing rewrites the save while it is
+# being removed.
+SERVER_CONFIG="${DOCKER_COMPOSE_DIR:-}/data/serverfiles/sdtdserver.xml"
+CONFIG_BACKUP="$OUTPUT_DIR/sdtdserver.xml.bak"
+if [ -f "$CONFIG_BACKUP" ]; then
+    log "restoring sdtdserver.xml from backup..."
+    if cp -f "$CONFIG_BACKUP" "$SERVER_CONFIG"; then
+        rm -f "$CONFIG_BACKUP"
+    else
+        log "warn: failed to restore $SERVER_CONFIG - the backup is kept at $CONFIG_BACKUP (continuing)"
+    fi
+fi
+
+FRESH_SAVE_FILE="$OUTPUT_DIR/fresh-save-name.txt"
+if [ -s "$FRESH_SAVE_FILE" ] && [ -n "${SERVER_SAVES_DIR:-}" ]; then
+    FRESH_SAVE_NAME="$(cat "$FRESH_SAVE_FILE")"
+    if [ "${TESTPILOT_KEEP_SAVE:-0}" = "1" ]; then
+        log "keeping throwaway save '$FRESH_SAVE_NAME' (TESTPILOT_KEEP_SAVE=1); delete it yourself when done"
+    # Only ever delete a directory this tool created. 01-start-server.sh writes this file
+    # solely for names it generated, and they always carry the "Fresh<timestamp>" suffix -
+    # re-checking that here means a hand-edited or truncated state file cannot turn this
+    # into "rm -rf the persistent save".
+    elif [[ "$FRESH_SAVE_NAME" == *Fresh[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9] ]]; then
+        while IFS= read -r save_dir; do
+            [ -n "$save_dir" ] || continue
+            log "removing throwaway save $save_dir..."
+            rm -rf "$save_dir" || log "warn: failed to remove $save_dir (continuing)"
+        done < <(find "$SERVER_SAVES_DIR" -mindepth 2 -maxdepth 2 -type d -name "$FRESH_SAVE_NAME" 2>/dev/null)
+        rm -f "$FRESH_SAVE_FILE"
+    else
+        log "warn: '$FRESH_SAVE_NAME' does not look like a name this tool generated; refusing to delete it"
+    fi
+fi
+
 log "teardown complete"

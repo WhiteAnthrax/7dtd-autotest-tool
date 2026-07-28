@@ -129,12 +129,30 @@ Even with the safe-teleport fix above, a character that died in an *earlier* run
 before that fix existed) stays dead in the save - there's no console command found so
 far that revives a dead player, and this mod doesn't attempt to synthesize one.
 
-**Workaround used here**: point the server at a brand-new `GameName`/`WorldGenSeed` (see
-`docs/runbook.md`), which also gives every player a fresh, alive character. Not
-automated by this tool yet - a "use a disposable world every run" mode (vs. "reuse one
-persistent world") is a plausible future improvement, since both have legitimate uses
-(disposable = fully deterministic; persistent = faster, closer to a real long-lived
-server).
+**Fix, now automated**: `run-roundtrip.sh --fresh-save` runs against a throwaway save, so
+the character is always fresh and alive. `01-start-server.sh` rewrites `sdtdserver.xml`'s
+`GameName` to `<GAME_SAVE_NAME>Fresh<UTC timestamp>` before starting the server and
+records the name; `07-teardown.sh` restores the config and deletes the save afterwards.
+Without the flag the persistent save is reused, which is faster and closer to a real
+long-lived server - both modes have legitimate uses.
+
+Two things worth knowing about how that is built:
+
+- **Only `GameName` is changed, not `WorldGenSeed`.** `GameName` selects the save slot,
+  which is what carries player state and visit history - so changing it alone gets the
+  full determinism benefit. `WorldGenSeed` selects the *terrain*, and changing it forces a
+  full RWG generation costing tens of minutes and several GB per run for nothing extra.
+  The earlier manual workaround changed both, which is why it felt so expensive.
+- **The save name has to travel between stages.** `03-deploy-mods.sh` and `06-verify.sh`
+  locate the data file by save name, so they resolve it through
+  `effective_game_save_name` rather than reading `GAME_SAVE_NAME` directly. Miss that and
+  verification silently checks the *persistent* save - which, on a machine that has run
+  this pipeline before, contains a previous run's data and can pass while the run under
+  test wrote nothing at all.
+
+Teardown deletes a directory, so it only ever removes a save whose recorded name still
+matches the generated `*Fresh<14 digits>` shape. A truncated or hand-edited state file
+therefore cannot turn cleanup into "delete the persistent save".
 
 ## Discord login prompt hangs the client with no error and no queue activity
 
@@ -238,3 +256,38 @@ world this tool had no business touching.
 The world-name path segment is left as a wildcard (RWG world names are seed-derived,
 not predictable ahead of time); the save name is the one value this tool actually
 controls and knows for certain.
+
+## A `set -e` script that dies outside `die` tells you nothing at all
+
+`01-start-server.sh` once exited 121 seconds into a 480-second wait, printing not one
+line. No timeout message, no error - output simply stopped, and the run reported
+`start-server failed` with nothing to go on. Re-running the same stage immediately
+afterwards succeeded in 127 seconds, so there was nothing left to reproduce against.
+
+That is the real defect: under `set -e`, any command that fails somewhere other than an
+explicit `die` ends the script silently, which is indistinguishable from a clean early
+return. Two changes make it diagnosable:
+
+- `trace_errors` (in `lib/common.sh`) installs an `ERR` trap that logs the file, line,
+  exit status and failing command. It needs `set -E` as well, or the trap won't fire for
+  failures inside library functions - which is exactly where this one was. Every
+  `set -e` stage calls it now.
+- `docker_server_latest_log` no longer uses `ls -t ... | head -1`. Callers assign it with
+  `x="$(...)"`, so under `pipefail` a benign hiccup in that pipeline (ls racing a file
+  that is rotated away, or SIGPIPE once `head` has taken its line) becomes a silent
+  `set -e` death. The pure-bash loop that replaced it cannot fail that way.
+
+Honest status: the original silent exit was never reproduced, so this is the most
+plausible cause plus a guarantee that a recurrence will actually say something. If it
+happens again, the log will now name the line.
+
+## A failure summary that reports the *previous* run's verdict
+
+`run-roundtrip.sh` builds its `ROUNDTRIP_RESULT` line by reading
+`output/<profile>/verify-result.json`, which `06-verify.sh` writes. On a run that failed
+before `06-verify.sh`, that file is whatever the last run left behind - so a genuinely
+broken run printed `"status": "start-server failed"` next to `"verify": {"ok": true}`.
+
+Easy to skim past, and exactly the sort of thing that gets a broken run waved through.
+The run now deletes that file before starting, so the verify block only ever describes a
+verification that actually ran this time.

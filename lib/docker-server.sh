@@ -34,11 +34,26 @@ docker_server_restart() {
     docker_server_wait_new_log "$previous_log" 60
 }
 
-# docker_server_latest_log: prints the path of the most recently created server log.
+# docker_server_latest_log: prints the path of the most recently modified server log, or
+# nothing at all when there is none.
+#
+# Deliberately not `ls -t ... | head -1`: callers assign this with x="$(...)", and under
+# `set -o pipefail` that pipeline can report failure for entirely benign reasons - ls
+# racing a file that is rotated away mid-listing, or SIGPIPE once head has taken its one
+# line. In a `set -e` script that spurious non-zero silently kills the run. This form
+# cannot fail that way, and returns empty when the glob matches nothing (every caller
+# already guards on that with [ -n "$logfile" ]).
 docker_server_latest_log() {
     require_var DOCKER_COMPOSE_DIR
-    # shellcheck disable=SC2012 # filenames here are timestamp-based, non-alphanumeric edge cases don't apply
-    ls -t "${DOCKER_COMPOSE_DIR}/data/serverfiles"/output_log__*.txt 2>/dev/null | head -1
+    local newest="" candidate
+    for candidate in "${DOCKER_COMPOSE_DIR}/data/serverfiles"/output_log__*.txt; do
+        # An unmatched glob comes back literal, so check the file really exists.
+        [ -f "$candidate" ] || continue
+        if [ -z "$newest" ] || [ "$candidate" -nt "$newest" ]; then
+            newest="$candidate"
+        fi
+    done
+    printf '%s' "$newest"
 }
 
 # docker_server_wait_new_log <previous_log_path> [timeout_seconds]: blocks until

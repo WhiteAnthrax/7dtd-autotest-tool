@@ -42,6 +42,11 @@ This runs the full pipeline (start server -> build mods -> deploy -> launch clie
 run scenario -> verify -> tear down) and prints a final `ROUNDTRIP_RESULT {...}` JSON
 line. Exit code 0 means the whole thing passed.
 
+Runs reuse the profile's persistent save by default. Add `--fresh-save` to run against a
+throwaway save instead, so the player always starts fresh and alive with no visit history;
+teardown restores the server config and deletes the save (`--keep-save` keeps it). The
+generated terrain is reused either way - see `docs/runbook.md`.
+
 See `docs/runbook.md` for a step-by-step walkthrough (including running each stage
 individually) and `docs/lessons-learned.md` before you go modifying anything - several
 non-obvious pitfalls are documented there from hard-won debugging sessions.
