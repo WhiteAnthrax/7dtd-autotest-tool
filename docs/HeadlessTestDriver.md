@@ -117,9 +117,14 @@ have to be dealt with for a truly unattended run:
   (`World.m_ChunkManager.GetDisplayedChunkGameObjectsCount()` vs `GameUtils.GetViewDistance()`,
   skipped when `World.ChunkCache.IsFixedSize`), `DistantTerrain.IsTerrainReady`, and
   `LocalPlayerUI.GetUIForPrimaryPlayer().xui.IsReady`.
-- **Discord login prompt**: not handled by this mod. If your test machine's Discord account is
-  linked in a way that triggers this prompt, disable the Discord integration in the game's
-  Options once on that machine; it does not reappear afterward.
+- **Discord login prompt**: not handled by this mod, and it cannot be - `DiscordManager` handles
+  `ModEvents.MainMenuOpening` and returns `StopHandlersAndVanilla`, which suppresses the vanilla
+  main menu, so `ModEvents.MainMenuOpened` never fires and `MainMenuTrigger` never runs. The same
+  applies to the first-time Discord info dialog, which blocks even without a linked account. The
+  only escape in that handler is the `DiscordDisabled` game preference. No launch argument can set
+  it in time (verified by decompiling `Assembly-CSharp.dll` and live-testing). If you drive this
+  mod with this repo's pipeline, `04-launch-client.sh` sets that preference for you; if you drive
+  it yourself, disable Discord integration in the game's Options once on that machine.
 
 Both modes wait for `GameManager.Instance.World.GetPrimaryPlayer() != null` (up to
 `-testpilot.readytimeout` seconds) before opening the command queue, so a driver never races a
