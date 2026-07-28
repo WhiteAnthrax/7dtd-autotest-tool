@@ -55,6 +55,13 @@ if [ -n "${CLIENT_MODS_DIR:-}" ] && [ -n "${VTT_CLIENT_MOD_DIRNAME:-}" ] && [ -n
     run_on_omen_cmd "Copy-Item '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig' '${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll' -Force -ErrorAction SilentlyContinue; Remove-Item '${CLIENT_VTT_DIR}\\EnableTestHarness.txt' -Force -ErrorAction SilentlyContinue" \
         || log "warn: failed to restore client-side VisitedTraderTeleport (continuing)"
 
+    # Config/ is deployed alongside the DLL by 03-deploy-mods.sh, so it has to be put back
+    # too - otherwise the client keeps whatever localization/dialog files the last test run
+    # happened to ship, which is exactly the drift this pipeline is supposed to avoid.
+    log "restoring client-side VisitedTraderTeleport Config/ from backup..."
+    run_on_omen_cmd "if (Test-Path '${CLIENT_BACKUP_DIR}\\Config.orig') { Remove-Item '${CLIENT_VTT_DIR}\\Config' -Recurse -Force -ErrorAction SilentlyContinue; Copy-Item '${CLIENT_BACKUP_DIR}\\Config.orig' '${CLIENT_VTT_DIR}\\Config' -Recurse -Force }" \
+        || log "warn: failed to restore client-side Config/ (continuing)"
+
     log "removing SdtdTestPilot from the client..."
     run_on_omen_cmd "Remove-Item '${CLIENT_MODS_DIR}\\SdtdTestPilot' -Recurse -Force -ErrorAction SilentlyContinue" \
         || log "warn: failed to remove client-side SdtdTestPilot (continuing)"

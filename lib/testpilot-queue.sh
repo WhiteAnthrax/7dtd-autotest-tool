@@ -34,6 +34,39 @@ testpilot_submit() {
         -Id "$id" -Command "\"$command\"" -QueueDir "\"$OMEN_QUEUE_DIR\""
 }
 
+# next_id: a nanosecond timestamp, not an incrementing counter. submit_and_check calls
+# this inside a command substitution `$(...)`, which runs in a subshell - a counter
+# variable incremented there would never be visible to the parent shell, so every call
+# would silently return the same id and every command after the first would read back a
+# stale out/<id>.result file instead of waiting for its own.
+next_id() {
+    date +%s%N
+}
+
+# submit_and_check <command text>: submits through the queue, dies on a queue-level
+# timeout, prints the raw single-line result JSON.
+submit_and_check() {
+    local cmd="$1"
+    local result
+    result="$(testpilot_submit "$(next_id)" "$cmd")"
+    if [[ "$result" == TIMEOUT* ]]; then
+        die "command queue timed out submitting: $cmd"
+    fi
+    printf '%s' "$result"
+}
+
+# vtt_result_field <result_json> <field name>: pulls a field out of the VTT_TEST_RESULT /
+# TESTPILOT_RESULT marker embedded in .output (not the outer .ok, which only reflects
+# whether SdtdConsole.ExecuteSync threw).
+# The trailing `|| true` matters: with pipefail, a grep that finds no match exits non-zero
+# and would otherwise kill the calling script via `set -e` before it gets a chance to
+# check whether the result was actually empty.
+vtt_result_field() {
+    local result_json="$1"
+    local field="$2"
+    printf '%s' "$result_json" | jq -r '.output' | grep -oP "\"${field}\":\"?\K[^\",}]+" | tail -1 || true
+}
+
 # testpilot_reset_queue: removes and recreates the queue dir (used before a fresh
 # client launch so stale in/out/processed files from a prior run don't confuse things).
 testpilot_reset_queue() {

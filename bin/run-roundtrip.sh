@@ -97,6 +97,9 @@ if [ "$STEP_STATUS" = "unknown" ]; then
     "$BIN_DIR/05-run-scenario.sh" "$PROFILE" || STEP_STATUS="run-scenario failed"
 fi
 if [ "$STEP_STATUS" = "unknown" ]; then
+    "$BIN_DIR/05b-run-dialog-scenario.sh" "$PROFILE" || STEP_STATUS="run-dialog-scenario failed"
+fi
+if [ "$STEP_STATUS" = "unknown" ]; then
     "$BIN_DIR/06-verify.sh" "$PROFILE" || STEP_STATUS="verify failed"
 fi
 [ "$STEP_STATUS" = "unknown" ] && STEP_STATUS="ok"
