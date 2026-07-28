@@ -10,6 +10,9 @@ ROOT_DIR="$(dirname "$BIN_DIR")"
 # shellcheck source=lib/common.sh
 source "$ROOT_DIR/lib/common.sh"
 
+# Surface `set -e` failures instead of exiting silently (see lib/common.sh).
+trace_errors
+
 [ $# -eq 1 ] || die "usage: $0 <profile>"
 PROFILE="$1"
 load_profile "$PROFILE"
@@ -23,8 +26,10 @@ RESULT_FILE="$OUTPUT_DIR/scenario-result.json"
 
 # Match on GAME_SAVE_NAME, not "newest file under SERVER_SAVES_DIR" - see the comment in
 # 03-deploy-mods.sh for why the latter picks up unrelated worlds on this shared machine.
-DATA_FILE="$(find "$SERVER_SAVES_DIR" -path "*/${GAME_SAVE_NAME}/VisitedTraderTeleportData.json" 2>/dev/null | head -1)"
-[ -n "$DATA_FILE" ] || die "no VisitedTraderTeleportData.json found under $SERVER_SAVES_DIR for save name '$GAME_SAVE_NAME'"
+# Follows 01-start-server.sh's --fresh-save throwaway save when there is one.
+SAVE_NAME="$(effective_game_save_name "$OUTPUT_DIR")"
+DATA_FILE="$(find "$SERVER_SAVES_DIR" -path "*/${SAVE_NAME}/VisitedTraderTeleportData.json" 2>/dev/null | head -1)"
+[ -n "$DATA_FILE" ] || die "no VisitedTraderTeleportData.json found under $SERVER_SAVES_DIR for save name '$SAVE_NAME'"
 log "using server-side data file: $DATA_FILE"
 
 RECORD_KEY="$(jq -r '.record_reported_key' "$RESULT_FILE")"

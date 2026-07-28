@@ -37,6 +37,29 @@ Watch for the final line: `ROUNDTRIP_RESULT {"profile":"v3","status":"ok",...}`.
 `status` is `"ok"` on success, or `"<stage> failed"` naming the stage that broke.
 Teardown always runs, even on failure (it's wired to `run-roundtrip.sh`'s `EXIT` trap).
 
+### Persistent save vs. throwaway save
+
+By default the run reuses the profile's persistent save (`GAME_SAVE_NAME`). That is fast
+and closer to a real long-lived server, and the pipeline already resets visit history
+between runs.
+
+What it does *not* reset is the player. If a run leaves the character dead - a teleport
+into a bad spot will do it - that death is saved, and no console command brings them back
+(see `docs/lessons-learned.md`). For a guaranteed-clean starting point:
+
+```bash
+./bin/run-roundtrip.sh --profile v3 --fresh-save
+```
+
+This switches `sdtdserver.xml`'s `GameName` to a throwaway `<GAME_SAVE_NAME>Fresh<UTC timestamp>`
+for the run, so the player starts fresh and alive with no visit history. Teardown restores
+the config and deletes the save. Add `--keep-save` to keep it for post-mortem inspection
+(you then have to delete it yourself).
+
+`WorldGenSeed` is deliberately left alone, so the already-generated terrain is reused.
+Regenerating terrain costs tens of minutes and several GB per run and buys no additional
+determinism - the save slot is what carries player and visit state.
+
 ## Running stages individually (for debugging)
 
 Each stage is a standalone script; run them in order with the same profile:

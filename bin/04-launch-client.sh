@@ -13,6 +13,9 @@ source "$ROOT_DIR/lib/ssh-omen.sh"
 # shellcheck source=lib/testpilot-queue.sh
 source "$ROOT_DIR/lib/testpilot-queue.sh"
 
+# Surface `set -e` failures instead of exiting silently (see lib/common.sh).
+trace_errors
+
 [ $# -eq 1 ] || die "usage: $0 <profile>"
 PROFILE="$1"
 load_profile "$PROFILE"

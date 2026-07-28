@@ -19,6 +19,9 @@ source "$ROOT_DIR/lib/ssh-omen.sh"
 # shellcheck source=lib/docker-server.sh
 source "$ROOT_DIR/lib/docker-server.sh"
 
+# Surface `set -e` failures instead of exiting silently (see lib/common.sh).
+trace_errors
+
 [ $# -eq 1 ] || die "usage: $0 <profile>"
 PROFILE="$1"
 load_profile "$PROFILE"
@@ -62,7 +65,9 @@ cp "$OUTPUT_DIR/VisitedTraderTeleport.debug.dll" "$SERVER_VTT_DIR/VisitedTraderT
 # ahead of time; the save (game) name is the one value this tool actually controls.
 require_var SERVER_SAVES_DIR
 require_var GAME_SAVE_NAME
-DATA_FILE="$(find "$SERVER_SAVES_DIR" -path "*/${GAME_SAVE_NAME}/VisitedTraderTeleportData.json" 2>/dev/null | head -1)"
+# Follows 01-start-server.sh's --fresh-save throwaway save when there is one.
+SAVE_NAME="$(effective_game_save_name "$OUTPUT_DIR")"
+DATA_FILE="$(find "$SERVER_SAVES_DIR" -path "*/${SAVE_NAME}/VisitedTraderTeleportData.json" 2>/dev/null | head -1)"
 if [ -n "$DATA_FILE" ]; then
     log "backing up and clearing visit history ($DATA_FILE) for a deterministic run..."
     cp "$DATA_FILE" "$OUTPUT_DIR/server-data-backup.json"
