@@ -291,3 +291,38 @@ broken run printed `"status": "start-server failed"` next to `"verify": {"ok": t
 Easy to skim past, and exactly the sort of thing that gets a broken run waved through.
 The run now deletes that file before starting, so the verify block only ever describes a
 verification that actually ran this time.
+
+## The server updates itself, so client/server version drift is the default
+
+The Docker server runs `startserver-with-update.sh`: it pulls whatever 7DTD release is
+current *every time it starts*. The Windows client is a pinned copy that only moves when
+someone updates it deliberately. So the two drift apart on their own, without anybody
+touching this tool - observed mid-session, when the server went 3.0.1 -> 3.1.0 between one
+run and the next.
+
+A mismatched client shows a version dialog and never joins. From the pipeline's side that
+is a READY timeout with no error in any log it collects - the only tell was a human
+happening to look at the screen. It reads exactly like the Discord hang, and like every
+other hang, which is what makes it expensive.
+
+**Fix**: `04-launch-client.sh` compares compatibility versions right after launching.
+Two things made this less obvious than it sounds:
+
+- **There is no version file to read before launching.** The exe's `ProductVersion` is
+  Unity's (`2022.3.62f2`), not the game's, and the install carries nothing else usable.
+  The dependable source is the client's own log line, written ~0.07s into startup:
+  `INF Version: V 3.1.0 (b13) Compatibility Version: V 3.1.0, Build: WindowsPlayer 64 Bit`.
+  So the check has to happen *after* launch - which is still early enough to be useful,
+  since it fires in seconds instead of after the full READY timeout.
+- **Player.log is shared by every install on the machine** (Unity keys it by
+  company/product, the same reason the Discord setting is shared). A stale line from a
+  previous launch - possibly of the *other* profile's client - is easy to read by mistake,
+  so `Get-ClientVersion.ps1` only trusts a log that was written to recently, judged
+  against the Windows machine's own clock rather than a timestamp passed in from Linux
+  (which would break on any clock skew).
+
+Compare **"Compatibility Version"**, not the build number: the client and dedicated-server
+packages of the same release carry different build numbers (`3.1.0 (b13)` on both here,
+but that is not guaranteed), while the compatibility version is the field the game itself
+matches on. Only a confirmed mismatch is fatal - an unreadable version warns and
+continues, so the check cannot block a run that would otherwise work.

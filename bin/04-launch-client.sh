@@ -12,6 +12,8 @@ source "$ROOT_DIR/lib/common.sh"
 source "$ROOT_DIR/lib/ssh-omen.sh"
 # shellcheck source=lib/testpilot-queue.sh
 source "$ROOT_DIR/lib/testpilot-queue.sh"
+# shellcheck source=lib/docker-server.sh
+source "$ROOT_DIR/lib/docker-server.sh"
 
 # Surface `set -e` failures instead of exiting silently (see lib/common.sh).
 trace_errors
@@ -51,6 +53,24 @@ run_on_omen_script "$ROOT_DIR/lib/windows/Start-TestPilotClient.ps1" \
     -WorkingDirectory "\"${CLIENT_GAME_PATH}\"" \
     -TaskName "\"${OMEN_TASK_NAME}\"" \
     -UserId "\"${OMEN_USER_ID}\""
+
+# Check client vs server compatibility *before* settling in for the READY wait. The Docker
+# server runs startserver-with-update.sh, so it quietly picks up new 7DTD releases while
+# the client stays pinned to whatever was installed - and a mismatched client shows a
+# version dialog and never connects, which from here is indistinguishable from any other
+# hang. Catching it now turns a silent READY_TIMEOUT_SECONDS-long wait into an immediate,
+# actionable error. Only a confirmed mismatch is fatal: if either version can't be read,
+# say so and carry on rather than blocking a run that might be perfectly fine.
+SERVER_COMPAT="$(docker_server_compat_version)"
+CLIENT_COMPAT="$(run_on_omen_script "$ROOT_DIR/lib/windows/Get-ClientVersion.ps1" -TimeoutSeconds 60 \
+    | tr -d '\r' | sed -n 's/^COMPATIBILITY //p' | head -1)"
+if [ -z "$SERVER_COMPAT" ] || [ -z "$CLIENT_COMPAT" ]; then
+    log "warn: could not determine both versions (server='${SERVER_COMPAT:-?}' client='${CLIENT_COMPAT:-?}'), skipping the compatibility check"
+elif [ "$SERVER_COMPAT" != "$CLIENT_COMPAT" ]; then
+    die "game version mismatch: server is V${SERVER_COMPAT}, client is V${CLIENT_COMPAT}. The client cannot join and would just hang at the version dialog. Update the client install at ${CLIENT_GAME_PATH} to V${SERVER_COMPAT} (or pin the server - see docs/runbook.md)."
+else
+    log "version check ok: server and client are both V${SERVER_COMPAT}"
+fi
 
 testpilot_wait_ready "$READY_TIMEOUT_SECONDS"
 log "client is connected and the command queue is ready"

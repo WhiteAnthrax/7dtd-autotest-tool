@@ -78,6 +78,21 @@ docker_server_wait_new_log() {
     done
 }
 
+# docker_server_compat_version: prints the running server's compatibility version (e.g.
+# "3.1.0") as taken from its log line
+#   INF Version: V 3.1.0 (b13) Compatibility Version: V 3.1.0, Build: LinuxServer 64 Bit
+# Prints nothing if it cannot be determined. "Compatibility Version" is the field the game
+# itself matches on, so it is the one to compare against a client - not the build number,
+# which differs between the client and dedicated-server packages of the same release.
+docker_server_compat_version() {
+    local logfile
+    logfile="$(docker_server_latest_log)"
+    [ -n "$logfile" ] || return 0
+    # || true: no match is a normal outcome here, and without it pipefail + set -e would
+    # kill the caller outright (see docs/lessons-learned.md).
+    grep -oP 'Compatibility Version: V \K[^,]+' "$logfile" 2>/dev/null | head -1 || true
+}
+
 # docker_server_wait_mod_loaded [timeout_seconds]: blocks until the server log shows
 # the VisitedTraderTeleport mod loaded, or dies after the timeout.
 docker_server_wait_mod_loaded() {
