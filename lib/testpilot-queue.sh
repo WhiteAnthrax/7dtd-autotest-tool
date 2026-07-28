@@ -26,12 +26,57 @@ testpilot_wait_ready() {
 
 # testpilot_submit <id> <command text>: submits one console command through the queue
 # and prints the single-line result JSON to stdout.
+#
+# Invoke-TestPilotCmd.ps1 hands the result back base64-encoded ("B64 <payload>") so the
+# game's own UTF-8 bytes survive the Japanese-locale Windows host and the SSH hop intact -
+# see the comment in that script. Anything else (notably "TIMEOUT ...") is passed through
+# unchanged so callers can keep matching on it.
 testpilot_submit() {
     require_var OMEN_QUEUE_DIR
     local id="$1"
     local command="$2"
-    run_on_omen_script "$LIB_DIR/windows/Invoke-TestPilotCmd.ps1" \
-        -Id "$id" -Command "\"$command\"" -QueueDir "\"$OMEN_QUEUE_DIR\""
+    local raw
+    raw="$(run_on_omen_script "$LIB_DIR/windows/Invoke-TestPilotCmd.ps1" \
+        -Id "$id" -Command "\"$command\"" -QueueDir "\"$OMEN_QUEUE_DIR\"")"
+
+    if printf '%s' "$raw" | grep -q '^B64 '; then
+        printf '%s' "$raw" | grep '^B64 ' | head -1 | cut -d' ' -f2- | tr -d '\r\n ' | base64 -d
+    else
+        printf '%s' "$raw"
+    fi
+}
+
+# next_id: a nanosecond timestamp, not an incrementing counter. submit_and_check calls
+# this inside a command substitution `$(...)`, which runs in a subshell - a counter
+# variable incremented there would never be visible to the parent shell, so every call
+# would silently return the same id and every command after the first would read back a
+# stale out/<id>.result file instead of waiting for its own.
+next_id() {
+    date +%s%N
+}
+
+# submit_and_check <command text>: submits through the queue, dies on a queue-level
+# timeout, prints the raw single-line result JSON.
+submit_and_check() {
+    local cmd="$1"
+    local result
+    result="$(testpilot_submit "$(next_id)" "$cmd")"
+    if [[ "$result" == TIMEOUT* ]]; then
+        die "command queue timed out submitting: $cmd"
+    fi
+    printf '%s' "$result"
+}
+
+# vtt_result_field <result_json> <field name>: pulls a field out of the VTT_TEST_RESULT /
+# TESTPILOT_RESULT marker embedded in .output (not the outer .ok, which only reflects
+# whether SdtdConsole.ExecuteSync threw).
+# The trailing `|| true` matters: with pipefail, a grep that finds no match exits non-zero
+# and would otherwise kill the calling script via `set -e` before it gets a chance to
+# check whether the result was actually empty.
+vtt_result_field() {
+    local result_json="$1"
+    local field="$2"
+    printf '%s' "$result_json" | jq -r '.output' | grep -oP "\"${field}\":\"?\K[^\",}]+" | tail -1 || true
 }
 
 # testpilot_reset_queue: removes and recreates the queue dir (used before a fresh

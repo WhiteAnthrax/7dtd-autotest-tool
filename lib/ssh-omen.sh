@@ -50,3 +50,40 @@ copy_from_omen() {
     require_var OMEN_SSH_HOST
     scp -q "${OMEN_SSH_HOST}:${1//\\//}" "$2"
 }
+
+# copy_dir_to_omen <local_dir> <remote_windows_dir>
+# Copies the *contents* of local_dir into remote_windows_dir, which must already exist.
+copy_dir_to_omen() {
+    require_var OMEN_SSH_HOST
+    scp -qr "$1/." "${OMEN_SSH_HOST}:${2//\\//}"
+}
+
+# copy_dir_from_omen <remote_windows_dir> <local_dir>
+# Replaces local_dir with the contents of remote_windows_dir.
+copy_dir_from_omen() {
+    require_var OMEN_SSH_HOST
+    rm -rf "${2:?}"
+    mkdir -p "$2"
+    scp -qr "${OMEN_SSH_HOST}:${1//\\//}/." "$2"
+}
+
+# wait_for_omen_file <remote_windows_path> [timeout_seconds]
+# Polls until the file exists. Used for work the game finishes asynchronously - a
+# screenshot is written by a coroutine some frames after the console command returns,
+# so the command's own success says nothing about the file being on disk yet.
+wait_for_omen_file() {
+    require_var OMEN_SSH_HOST
+    local remote_path="$1"
+    local timeout="${2:-30}"
+    local waited=0
+    while true; do
+        if run_on_omen_cmd "if (Test-Path '${remote_path}') { exit 0 } else { exit 1 }" >/dev/null 2>&1; then
+            return 0
+        fi
+        if [ "$waited" -ge "$timeout" ]; then
+            return 1
+        fi
+        sleep 2
+        waited=$((waited + 2))
+    done
+}

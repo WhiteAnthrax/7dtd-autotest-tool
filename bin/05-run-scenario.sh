@@ -27,38 +27,8 @@ OUTPUT_DIR="$ROOT_DIR/output/$PROFILE"
 mkdir -p "$OUTPUT_DIR"
 RESULT_FILE="$OUTPUT_DIR/scenario-result.json"
 
-# Nanosecond timestamp, not an incrementing counter: submit_and_check calls next_id
-# inside a command substitution `$(...)`, which runs in a subshell - a counter variable
-# incremented there would never be visible to the parent shell, so every call would
-# silently return the same id and every command after the first would read back a
-# stale out/<id>.result file instead of waiting for its own.
-next_id() {
-    date +%s%N
-}
-
-# submit_and_check <command text>: submits through the queue, dies on a queue-level
-# timeout, prints the raw single-line result JSON.
-submit_and_check() {
-    local cmd="$1"
-    local result
-    result="$(testpilot_submit "$(next_id)" "$cmd")"
-    if [[ "$result" == TIMEOUT* ]]; then
-        die "command queue timed out submitting: $cmd"
-    fi
-    printf '%s' "$result"
-}
-
-# vtt_result_field <result_json> <field name>: pulls a field out of the VTT_TEST_RESULT
-# marker embedded in .output (not the outer .ok, which only reflects whether
-# SdtdConsole.ExecuteSync threw - see docs from the VisitedTraderTeleport repo).
-# The trailing `|| true` on every grep below matters: with pipefail, a grep that finds
-# no match exits non-zero and would otherwise kill the whole script via `set -e` before
-# the caller gets a chance to check whether the result was actually empty.
-vtt_result_field() {
-    local result_json="$1"
-    local field="$2"
-    printf '%s' "$result_json" | jq -r '.output' | grep -oP "\"${field}\":\"?\K[^\",}]+" | tail -1 || true
-}
+# next_id / submit_and_check / vtt_result_field live in lib/testpilot-queue.sh so the
+# dialog scenario (05b) drives the queue exactly the same way.
 
 log "step: le (initial)"
 LE1_OUTPUT="$(submit_and_check "le" | jq -r '.output')"

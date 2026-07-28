@@ -54,6 +54,16 @@ copy_from_omen "${WORK_REMOTE_VTT}\\src\\VisitedTraderTeleport\\bin\\Debug\\Visi
     "$OUTPUT_DIR/VisitedTraderTeleport.debug.dll"
 log "VisitedTraderTeleport.debug.dll -> $OUTPUT_DIR"
 
+# The mod's Config/ (Localization.csv, dialogs.xml, VisitedTraderTeleport.xml) travels with
+# the DLL. Without this the pipeline would deploy a new DLL on top of whatever Config the
+# client and server happened to already have installed, so a change to the localization
+# file or the dialog definitions would be tested against the *old* copy and pass without
+# ever having been loaded. Taken from the build tree, not the local checkout, so what gets
+# deployed is exactly what was built.
+log "collecting VisitedTraderTeleport Config/ from the build tree..."
+copy_dir_from_omen "${WORK_REMOTE_VTT}\\mod\\VisitedTraderTeleport\\Config" "$OUTPUT_DIR/mod-config"
+log "mod-config/ -> $OUTPUT_DIR"
+
 # --- 2. SdtdTestPilot (Debug, matching GameFlavor) ---
 log "archiving SdtdTestPilot (this repo)..."
 TMP_TESTPILOT_TAR="$(mktemp --suffix=.tar.gz)"

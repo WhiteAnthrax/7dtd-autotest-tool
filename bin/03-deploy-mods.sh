@@ -33,6 +33,7 @@ done
 OUTPUT_DIR="$ROOT_DIR/output/$PROFILE"
 [ -f "$OUTPUT_DIR/VisitedTraderTeleport.debug.dll" ] || die "missing $OUTPUT_DIR/VisitedTraderTeleport.debug.dll (run 02-build-mods.sh first)"
 [ -f "$OUTPUT_DIR/SdtdTestPilot.debug.dll" ] || die "missing $OUTPUT_DIR/SdtdTestPilot.debug.dll (run 02-build-mods.sh first)"
+[ -d "$OUTPUT_DIR/mod-config" ] || die "missing $OUTPUT_DIR/mod-config (run 02-build-mods.sh first)"
 
 # --- Server side (direct filesystem access, this machine) ---
 SERVER_VTT_DIR="$SERVER_MODS_DIR/VisitedTraderTeleport"
@@ -46,6 +47,14 @@ cp -a "$SERVER_VTT_DIR" "$SERVER_BACKUP_DIR"
 log "deploying Debug VisitedTraderTeleport to the server..."
 cp "$OUTPUT_DIR/VisitedTraderTeleport.debug.dll" "$SERVER_VTT_DIR/VisitedTraderTeleport.dll"
 : > "$SERVER_VTT_DIR/EnableTestHarness.txt"
+
+# Deploy the built Config/ too, not just the DLL - otherwise a Localization.csv or
+# dialogs.xml change is never actually loaded and the run silently verifies the previously
+# installed copy. The whole server mod dir was copied to SERVER_BACKUP_DIR above, so
+# teardown's restore already covers this.
+log "deploying VisitedTraderTeleport Config/ to the server..."
+mkdir -p "$SERVER_VTT_DIR/Config"
+cp -rf "$OUTPUT_DIR/mod-config/." "$SERVER_VTT_DIR/Config/"
 
 # Reset visit history so vtttest record's canonicalized-key resolution is deterministic.
 # VisitedTraderTeleport merges a new visit into an existing destination when it falls
@@ -92,9 +101,17 @@ CLIENT_BACKUP_DIR="${OMEN_SCRATCH_DIR}\\mod-backup"
 log "backing up client-side VisitedTraderTeleport to $OMEN_SSH_HOST:$CLIENT_BACKUP_DIR..."
 run_on_omen_cmd "New-Item -ItemType Directory -Force -Path '${CLIENT_BACKUP_DIR}' | Out-Null; Copy-Item '${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll' '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig' -Force"
 
+# Unlike the server side (whose whole mod dir is copied to SERVER_BACKUP_DIR above), the
+# client backup is file-by-file, so Config/ needs its own copy before it is overwritten.
+run_on_omen_cmd "Remove-Item '${CLIENT_BACKUP_DIR}\\Config.orig' -Recurse -Force -ErrorAction SilentlyContinue; if (Test-Path '${CLIENT_VTT_DIR}\\Config') { Copy-Item '${CLIENT_VTT_DIR}\\Config' '${CLIENT_BACKUP_DIR}\\Config.orig' -Recurse -Force }"
+
 log "deploying Debug VisitedTraderTeleport to the client..."
 copy_to_omen "$OUTPUT_DIR/VisitedTraderTeleport.debug.dll" "${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll"
 run_on_omen_cmd "New-Item -ItemType File -Force -Path '${CLIENT_VTT_DIR}\\EnableTestHarness.txt' | Out-Null"
+
+log "deploying VisitedTraderTeleport Config/ to the client..."
+run_on_omen_cmd "New-Item -ItemType Directory -Force -Path '${CLIENT_VTT_DIR}\\Config' | Out-Null"
+copy_dir_to_omen "$OUTPUT_DIR/mod-config" "${CLIENT_VTT_DIR}\\Config"
 
 log "deploying SdtdTestPilot to the client..."
 CLIENT_TESTPILOT_DIR="${CLIENT_MODS_DIR}\\SdtdTestPilot"
