@@ -100,6 +100,28 @@ on the Windows host.
   loudly if they ever diverge - if you see that error, run the pipeline as the same
   Windows account the client runs as.
 
+## The server updates itself; the client doesn't
+
+The Docker server runs `startserver-with-update.sh`, so **it picks up new 7DTD releases on
+every start**. The Windows client is a pinned copy that only changes when someone updates
+it. They drift apart on their own, and a mismatched client shows a version dialog and
+never connects - which, from the pipeline's side, looks exactly like any other hang.
+
+`04-launch-client.sh` compares the two compatibility versions right after launching and
+fails immediately with both numbers if they differ, rather than sitting in the READY wait
+for `READY_TIMEOUT_SECONDS` and then reporting nothing useful. If you see that error:
+
+- **Update the client** to match the server. For a 7D2D Mod Launcher instance, update it
+  from the launcher; for a plain copy of the Steam install, re-copy it after Steam
+  updates.
+- **Or pin the server.** The compose project takes `STEAM_BETA` (see its
+  `docker-compose.yml`), and the update itself comes from `startserver-with-update.sh` -
+  point the service at `startserver.sh` instead if you want it to stay put. That is the
+  server owner's call, not this tool's, so nothing here changes it for you.
+
+Only a *confirmed* mismatch is fatal. If either version can't be read the run logs a
+warning and continues, so this check can't block an otherwise-fine run.
+
 ## Troubleshooting
 
 If a run leaves things in a bad state (killed mid-run, `run-roundtrip.sh`'s process was
