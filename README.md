@@ -48,8 +48,17 @@ teardown restores the server config and deletes the save (`--keep-save` keeps it
 generated terrain is reused either way - see `docs/runbook.md`.
 
 See `docs/runbook.md` for a step-by-step walkthrough (including running each stage
-individually) and `docs/lessons-learned.md` before you go modifying anything - several
-non-obvious pitfalls are documented there from hard-won debugging sessions.
+individually, and how to verify a change) and `docs/lessons-learned.md` before you go
+modifying anything - several non-obvious pitfalls are documented there from hard-won
+debugging sessions.
+
+```bash
+shellcheck -x bin/*.sh lib/*.sh   # same check CI runs
+pre-commit install                # once per clone: shellcheck + gitleaks on commit
+```
+
+The `SdtdTestPilot.Core` unit tests need the .NET SDK, which the Linux orchestration host
+may not have; CI runs them on every push. See `docs/runbook.md`.
 
 ## Layout
 

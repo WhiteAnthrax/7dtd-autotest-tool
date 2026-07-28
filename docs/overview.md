@@ -18,7 +18,7 @@ together and are usually used together:
    command queue, check the result against server-side save data, then restore
    everything.
 
-## Why a fresh world per profile
+## Why each run starts from known state
 
 Early versions of this tool reused whatever world the Docker server already had. Two
 problems came from that:
@@ -38,9 +38,14 @@ and restored by `07-teardown.sh`), and the default scenario only ever spawns and
 traders right next to the player's current position - so results don't depend on the
 world's history, and there's no reason for the player to end up somewhere dangerous.
 
-For a *genuinely* clean run (new player character too, not just reset visit history),
-point the server at an unused `GameName`/`WorldGenSeed` in `sdtdserver.xml` and update
-`GAME_SAVE_NAME` in the profile accordingly - see `docs/runbook.md`.
+For a *genuinely* clean run - a new player character too, not just reset visit history -
+use `run-roundtrip.sh --fresh-save`. It switches `sdtdserver.xml`'s `GameName` to a
+throwaway save for the run and puts everything back afterwards.
+
+Note what it deliberately does *not* touch: `WorldGenSeed`. `GameName` selects the save
+slot, which is what carries player state and visit history, so switching it alone gets the
+full benefit. `WorldGenSeed` selects the terrain, and changing it forces a full RWG
+generation costing tens of minutes and several GB per run for no added determinism.
 
 ## Why GAME_SAVE_NAME instead of "find the newest save file"
 
