@@ -74,6 +74,18 @@ Each stage is a standalone script; run them in order with the same profile:
 ./bin/07-teardown.sh v3          # restore both mods + visit history, stop client, stop server
 ```
 
+The stages take only a profile name, so `--fresh-save`/`--keep-save` (which
+`run-roundtrip.sh` parses) reach them as environment variables instead:
+
+```bash
+TESTPILOT_FRESH_SAVE=1 ./bin/01-start-server.sh v3   # throwaway save, as --fresh-save
+TESTPILOT_KEEP_SAVE=1 ./bin/07-teardown.sh v3        # keep it, as --keep-save
+```
+
+`01-start-server.sh` is the only stage that reads `TESTPILOT_FRESH_SAVE` (it is what
+rewrites `GameName`); the later stages pick the save up from the state file it writes, so
+they need no environment of their own.
+
 `output/<profile>/` accumulates build artifacts (`*.debug.dll`), backups
 (`server-mod-backup/`, `server-data-backup.json`), and results
 (`scenario-result.json`, `verify-result.json`) - useful for post-mortem inspection.
@@ -122,9 +134,42 @@ for `READY_TIMEOUT_SECONDS` and then reporting nothing useful. If you see that e
 Only a *confirmed* mismatch is fatal. If either version can't be read the run logs a
 warning and continues, so this check can't block an otherwise-fine run.
 
+## Verifying a change
+
+```bash
+shellcheck -x bin/*.sh lib/*.sh   # same check CI runs; -x follows the sourced lib/*.sh
+pre-commit install                # once per clone: runs shellcheck + gitleaks on commit
+```
+
+The unit tests need the .NET SDK, which the Linux orchestration host does not necessarily
+have (`dotnet` is not installed on the current one - the mods themselves are built on the
+Windows host by `02-build-mods.sh`). Where they do run:
+
+```bash
+dotnet test tests/SdtdTestPilot.Tests/SdtdTestPilot.Tests.csproj -c Release
+```
+
+CI (`.github/workflows/tests.yml`) runs exactly that on every push, so pushing a branch is
+a perfectly good way to run them. They only cover the engine-independent
+`SdtdTestPilot.Core` bits, so anything touching the pipeline itself still deserves a real
+`./bin/run-roundtrip.sh --profile v3`.
+
 ## Troubleshooting
 
 If a run leaves things in a bad state (killed mid-run, `run-roundtrip.sh`'s process was
 force-killed so its `EXIT` trap never fired), run `./bin/07-teardown.sh <profile>`
 manually - every step in it is safe to re-run and skips gracefully if there's nothing to
 restore.
+
+**A stale `output/<profile>/fresh-save-name.txt`.** That file is how stages after
+`01-start-server.sh` know to use a throwaway save. It is written by `01` and removed by
+`07` - so a `--fresh-save` run killed between the two leaves it behind (as does
+`--keep-save`, deliberately). Running a later stage on its own after that makes it look
+for a save that may no longer exist:
+
+```
+no VisitedTraderTeleportData.json found under ... for save name 'AutotestSafeFresh2026...'
+```
+
+Delete the file to go back to the profile's persistent save. A full `run-roundtrip.sh`
+needs no cleanup either way - `01` clears it at the start of every run.
