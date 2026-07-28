@@ -141,19 +141,86 @@ server).
 If the Windows account's Discord integration is enabled and linked in a way that
 triggers a login prompt on the main menu, the client process stays alive and
 `Responding: True` (not frozen), CPU time keeps ticking up slightly, but `Player.log`
-stops advancing entirely and `SdtdTestPilot` never logs `Connecting to...` -
-`MainMenuTrigger`'s hook never fires because the main menu never actually finishes
-opening. This looks identical to a generic hang; the only tell was
-`[Discord] Saving settings with DiscordDisabled=False` a few lines before the log went
-quiet.
+stops advancing entirely and `SdtdTestPilot` never logs `Connecting to...`. This looks
+identical to a generic hang. Reproduced deliberately, the last lines before the log goes
+quiet are `[Discord] Logging in with provisional account` followed by
+`Can not login with provisional account, platform ID already linked to a Discord account`.
 
-**Fix applied by hand**: disabled Discord integration once in the game's own Options on
-that Windows account. **Still open**: whether `-Discord...=false`-style launch
-arguments or a `LaunchPrefs`/`GamePref` equivalent can set this ahead of time instead of
-requiring a one-time manual step - `DiscordDisabled` does appear as a string in
-`Assembly-CSharp.dll`, but confirming whether it's settable from the command line needs
-the decompile-based investigation described in VisitedTraderTeleport's own
-`note_7dtd_assembly_reflection_probe` memory. Untested here; worth revisiting.
+**Mechanism** (decompiled, then confirmed by reproducing and fixing it live):
+`DiscordManager` registers a handler on `ModEvents.MainMenuOpening` - the event that
+fires *before* the menu opens - and it ends like this:
+
+```csharp
+if (!Settings.DiscordFirstTimeInfoShown && !Settings.DiscordDisabled) {
+    LocalPlayerUI.primaryUI.windowManager.Open(XUiC_DiscordInfo.ID, _bModal: true);
+    return ModEvents.EModEventResult.StopHandlersAndVanilla;   // first-time info dialog
+}
+if (Settings.DiscordDisabled) return ModEvents.EModEventResult.Continue;   // the only escape
+Init();
+XUiC_DiscordLogin.Open(null, _showSettingsButton: true, _waitForResultToShow: true, _skipOnSuccess: true);
+AuthManager.AutoLogin();
+return ModEvents.EModEventResult.StopHandlersAndVanilla;       // login prompt
+```
+
+`StopHandlersAndVanilla` suppresses the *vanilla* main-menu open as well as other
+handlers, so `XUiC_MainMenu.OnOpen` never runs, `ModEvents.MainMenuOpened` never fires,
+and `MainMenuTrigger` - which subscribes to exactly that event - never gets a chance to
+run. That is why the hang produces no error: nothing failed, the menu simply never
+opened. Note the first branch: on an account that has never seen the Discord info dialog,
+this blocks even without a linked Discord account.
+
+**No launch argument can fix this.** `DiscordDisabled` *is* a real `EnumGamePrefs` entry
+and `GameStartupHelper.ParsePref` does generically accept `-<GamePrefName>=<value>` for
+it - the same mechanism that makes `-SkipNewsScreen=true` work - so on paper
+`-DiscordDisabled=true` should work. Live-tested anyway (forcing `-DiscordDisabled=false`
+against a persisted `True`) and it does not: `DiscordManager` reads the pref before
+`GameStartupHelper.InitGamePrefs()`/`ApplyParsedGamePrefs()` applies command-line
+overrides onto `GamePrefs`. `-SkipNewsScreen=true` works only because the news screen is
+read late enough for the override to land in time. A good reminder that a mechanism which
+is provably present in the decompiled code can still lose a startup-ordering race.
+
+**Fix, now automated**: the setting is persisted in the Windows registry (the Windows
+build routes `GamePrefs` through Unity PlayerPrefs via `SaveDataPrefsUnity`, not through
+the `prefs.cfg` file that `SaveDataPrefsFile` would use), under
+`HKCU\Software\The Fun Pimps\7 Days To Die`. `04-launch-client.sh` disables Discord
+before launching and `07-teardown.sh` puts the previous state back; see
+`lib/windows/Set-DiscordDisabledPref.ps1`.
+
+**There are two storage formats, and a machine running both game lines needs both:**
+
+- v3.x: its own GamePref, value `DiscordDisabled_h<hash>` (DWORD).
+- v2.6: a field inside a JSON blob in value `DiscordSettings_h<hash>` (REG_BINARY,
+  UTF-8 JSON with a trailing NUL).
+
+v3.x treats the JSON blob as legacy - `DiscordSettings.Load()` migrates it once and then
+calls `SdPlayerPrefs.DeleteKey("DiscordSettings")`. Because the registry key is shared by
+every 7DTD install on the machine (Unity keys it by company/product name, not by install
+folder), **every v3 run wipes the setting the v2.6 client reads**, and the next v2.6 run
+silently falls back to "Discord enabled" and hangs. That is a genuinely nasty failure
+mode: v26 breaks because of something a *v3* run did, with nothing in the v26 logs
+pointing at the cause beyond `[Discord] Saving settings with DiscordDisabled=False`.
+Writing both formats on every run makes the order of profile runs stop mattering.
+
+Three traps worth remembering when touching this:
+
+- **`Get-ItemProperty` throws `InvalidCastException` on this key.** It holds 300+ values,
+  some of a type the PowerShell registry provider cannot cast, and it fails on the *whole
+  key* - which reads as "the value isn't there" and sent an earlier investigation off
+  looking for a nonexistent config file. Use the .NET API
+  (`[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey(...)`, `GetValueNames()`,
+  `GetValue()`) instead. `reg query` also works for eyeballing it.
+- **The registry write goes to the HKCU hive of whoever runs the script**, while the
+  client runs as a scheduled task under `OMEN_USER_ID`. If those ever differ, the write
+  lands in the wrong hive and silently does nothing. The script hard-fails on that
+  mismatch rather than letting it become another mystery hang.
+- **`[byte[]]` matters when writing the JSON blob.** In PowerShell,
+  `[Text.Encoding]::UTF8.GetBytes($s) + [byte]0` yields an `Object[]`, and
+  `RegistryKey.SetValue(..., Binary)` rejects it with a type-mismatch `ArgumentException`.
+  Build the array explicitly.
+
+Because the setting is per company/product rather than per install, there is nothing
+per-profile to configure - which is convenient, and is also exactly why the v3/v2.6
+interaction above exists.
 
 ## "Newest file" is the wrong way to find a save's data file on a shared machine
 

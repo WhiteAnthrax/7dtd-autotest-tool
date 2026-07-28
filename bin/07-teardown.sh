@@ -32,6 +32,21 @@ else
     log "warn: CLIENT_EXE_NAME/OMEN_TASK_NAME not set, skipping client stop"
 fi
 
+# --- Client: restore the Discord settings ---
+# Must run after the client has exited: the game writes its Discord settings back on
+# shutdown, so restoring while it is still running would just get overwritten. The stop
+# above already guarantees that ordering. The script no-ops if there is no backup, so a
+# run that failed before 04-launch-client.sh leaves nothing stale behind.
+if [ -n "${OMEN_USER_ID:-}" ] && [ -n "${OMEN_SCRATCH_DIR:-}" ]; then
+    log "restoring Discord settings..."
+    run_on_omen_script "$ROOT_DIR/lib/windows/Set-DiscordDisabledPref.ps1" \
+        -Mode Restore -ExpectedUser "\"${OMEN_USER_ID}\"" \
+        -BackupPath "\"${OMEN_SCRATCH_DIR}\\discord-pref-backup.json\"" \
+        || log "warn: failed to restore Discord settings (continuing)"
+else
+    log "warn: OMEN_USER_ID/OMEN_SCRATCH_DIR not set, skipping Discord settings restore"
+fi
+
 # --- Client: restore mods ---
 if [ -n "${CLIENT_MODS_DIR:-}" ] && [ -n "${VTT_CLIENT_MOD_DIRNAME:-}" ] && [ -n "${OMEN_SCRATCH_DIR:-}" ]; then
     CLIENT_VTT_DIR="${CLIENT_MODS_DIR}\\${VTT_CLIENT_MOD_DIRNAME}"

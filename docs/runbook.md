@@ -59,13 +59,23 @@ on the Windows host.
 
 ## Known manual steps
 
-- **Discord login prompt**: if the Windows account's Discord is linked in a way that
-  triggers a login prompt on the game's main menu, the client hangs indefinitely
-  waiting for it - `SdtdTestPilot` cannot dismiss it. Disable Discord integration once
-  in the game's own Options on that machine (Player.log will show
-  `[Discord] Saving settings with DiscordDisabled=True` after doing so). See
-  `docs/lessons-learned.md` - a command-line way to disable this ahead of time hasn't
-  been found yet.
+- **Discord login prompt**: handled automatically - no manual step needed.
+  `04-launch-client.sh` disables Discord in the registry (under
+  `HKCU\Software\The Fun Pimps\7 Days To Die`) before launching, and `07-teardown.sh`
+  restores the previous state. Without it, Discord's `MainMenuOpening` handler suppresses
+  the vanilla main menu and `MainMenuTrigger` never fires, which looks exactly like a
+  generic hang. See `docs/lessons-learned.md` for the mechanism and for why no launch
+  argument can do this instead.
+
+  Worth knowing: v3.x and v2.6 store this setting in *different* registry values, and the
+  registry key is shared by every 7DTD install on the machine, so a v3 run used to leave
+  the v26 profile hanging on its next run (v3.x deletes the value v2.6 reads). Both
+  formats are now written every run, so the order you run profiles in doesn't matter.
+
+  The one caveat: the registry write lands in the HKCU hive of the SSH user, while the
+  client runs as `OMEN_USER_ID`. Those are the same account today, and the script fails
+  loudly if they ever diverge - if you see that error, run the pipeline as the same
+  Windows account the client runs as.
 
 ## Troubleshooting
 
