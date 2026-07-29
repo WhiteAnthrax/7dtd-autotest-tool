@@ -14,6 +14,8 @@ source "$ROOT_DIR/lib/common.sh"
 source "$ROOT_DIR/lib/ssh-omen.sh"
 # shellcheck source=lib/docker-server.sh
 source "$ROOT_DIR/lib/docker-server.sh"
+# shellcheck source=lib/client-control.sh
+source "$ROOT_DIR/lib/client-control.sh"
 
 [ $# -eq 1 ] || die "usage: $0 <profile>"
 PROFILE="$1"
@@ -22,15 +24,7 @@ load_profile "$PROFILE"
 OUTPUT_DIR="$ROOT_DIR/output/$PROFILE"
 
 # --- Client: stop process/task ---
-if [ -n "${CLIENT_EXE_NAME:-}" ] && [ -n "${OMEN_TASK_NAME:-}" ]; then
-    log "stopping client process/task..."
-    PROC_NAME="${CLIENT_EXE_NAME%.exe}"
-    run_on_omen_script "$ROOT_DIR/lib/windows/Stop-TestPilotClient.ps1" \
-        -ProcessName "\"${PROC_NAME}\"" -TaskName "\"${OMEN_TASK_NAME}\"" \
-        || log "warn: failed to stop client process/task (continuing)"
-else
-    log "warn: CLIENT_EXE_NAME/OMEN_TASK_NAME not set, skipping client stop"
-fi
+stop_client
 
 # --- Client: restore the Discord settings ---
 # Must run after the client has exited: the game writes its Discord settings back on

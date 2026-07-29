@@ -42,6 +42,24 @@ Two things follow:
   dialog` needs `VisitedTraderTeleport`'s internals, so it ships there (Debug-only);
   screenshots are useful to any mod, so `testpilot screenshot` lives in `SdtdTestPilot`.
 
+## Why the language sweep is a separate driver
+
+The game reads `-language=` once, while parsing its command line, so there is no way to
+change the UI language of a running client. Checking a translation therefore means
+relaunching, and that does not fit inside `run-roundtrip.sh` as a flag - it is a different
+shape of run, not a variation on the same one.
+
+`run-language-sweep.sh` repeats only the part that is safe to repeat. The client launch,
+the dialog walkthrough and the verification run per language; the server start, the build,
+the deploy and the roundtrip scenario run once, because they take backups or depend on
+freshly-reset state and would damage or mislead the run on a second pass (see
+`docs/lessons-learned.md`).
+
+The one assertion that exists purely for this mode is that the game actually used the
+language it was given. Everything else about a run in German is identical to a run in
+English, so a client that quietly ignored the argument would produce a completely green
+result for text nobody had looked at.
+
 ## Why each run starts from known state
 
 Early versions of this tool reused whatever world the Docker server already had. Two

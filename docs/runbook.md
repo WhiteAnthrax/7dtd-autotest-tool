@@ -75,6 +75,13 @@ Each stage is a standalone script; run them in order with the same profile:
 ./bin/07-teardown.sh v3          # restore both mods + visit history, stop client, stop server
 ```
 
+`04-launch-client.sh` also takes `CLIENT_LANGUAGE` as an environment variable, which
+becomes the game's `-language=` launch argument:
+
+```bash
+CLIENT_LANGUAGE=german ./bin/04-launch-client.sh v3
+```
+
 The stages take only a profile name, so `--fresh-save`/`--keep-save` (which
 `run-roundtrip.sh` parses) reach them as environment variables instead:
 
@@ -99,7 +106,8 @@ the client-side scratch/queue dirs on the Windows host.
 ### Screenshots as evidence
 
 `05b-run-dialog-scenario.sh` captures what the client actually drew at each step into
-`output/<profile>/screenshots/`:
+`output/<profile>/screenshots/<language>/`, where `<language>` is the language the game
+reported using (not the one it was asked for - see the sweep below):
 
 | File | Shows |
 |---|---|
@@ -123,6 +131,52 @@ the vanilla HUD area, appear identically in shots taken before the mod's dialog 
 opened, and are a known artifact of reading the framebuffer this way (that read doesn't
 pick up separately-rendered textures). Nothing to do with `VisitedTraderTeleport` - don't
 spend time chasing them.
+
+## Checking every language
+
+```bash
+./bin/run-language-sweep.sh --profile v3 --fresh-save               # all 13 languages
+./bin/run-language-sweep.sh --profile v3 --languages german,russian # just these
+```
+
+Prefer `--fresh-save` here. A sweep is half an hour of idle player, and if a previous run
+left the character dead that death is in the save - which now fails *every* language,
+because the walkthrough asserts the player is alive and nothing revives them.
+
+Watch for `LANGUAGE_SWEEP_RESULT {"profile":"v3","status":"ok","ok":true,"failed":[]}`.
+
+The game reads `-language=<name>` once at startup, so each language means relaunching the
+client - roughly three minutes per language on top of the usual setup. The names are the
+column names from the mod's `Localization.csv`: `english`, `german`, `spanish`, `french`,
+`italian`, `japanese`, `koreana`, `polish`, `brazilian`, `russian`, `turkish`, `schinese`,
+`tchinese`.
+
+Per language the sweep keeps `screenshots/<language>/`, `dialog-<language>.json` and
+`verify-<language>.json`, plus one `language-sweep-result.json` summarising all of them.
+A failed language does not stop the sweep - knowing which ones are broken beats stopping
+at the first.
+
+Two assertions matter most here and both are mechanical:
+
+- **The client honoured the language it was given.** A client that silently falls back
+  still passes every other check, so the run would certify text nobody ever looked at.
+  `06-verify.sh` compares the requested language against the one the game reports.
+- **No raw `vtt_*` key reached the screen.** That is what a missing translation cell looks
+  like from the outside.
+- **The player was alive and stood still the whole time.** A sweep leaves an idle player
+  in the open world for half an hour; one that gets killed respawns somewhere else, which
+  re-orders the distance-sorted destination list and puts the respawn UI over every
+  screenshot afterwards - while the dialog data stays perfectly correct. The sweep runs
+  `killall` and `settime day` before each pass to make that unlikely, and `06-verify.sh`
+  fails the run if it happens anyway.
+
+What the assertions can't see is length. German and Russian run noticeably longer than
+English, and clipped or wrapped text is still perfectly correct data - so look at the
+screenshots after any change to response text or to the `Localization.csv`.
+
+Only `04`, `05b` and `06` repeat per language. `03-deploy-mods.sh` and
+`05-run-scenario.sh` deliberately run once; `docs/lessons-learned.md` explains why
+re-running them inside one sweep is unsafe.
 
 ## Known manual steps
 

@@ -393,3 +393,74 @@ Two things worth keeping:
   `B64 <base64 of the file's bytes>` and `testpilot_submit` decodes it, which is immune to
   the locale and console encoding of both machines. Setting `-Encoding UTF8` on the read
   would have fixed only the first of the two re-encodings.
+
+## Backup-taking steps quietly become destructive the second time they run
+
+Adding a driver that launches the client once per language (`run-language-sweep.sh`) meant
+re-running steps that had only ever run once per run. Three of them take a backup on the
+way in, and all three took it unconditionally:
+
+- `04-launch-client.sh` -> `Set-DiscordDisabledPref.ps1 -Mode Apply` recorded the current
+  Discord state before disabling it. On a second launch the "current state" is already
+  *disabled*, so teardown would faithfully restore that and leave the user's Discord
+  integration off for good.
+- `03-deploy-mods.sh` re-copies the installed mod to `output/<profile>/server-mod-backup`
+  and the live `VisitedTraderTeleportData.json` to `server-data-backup.json`. Run twice,
+  the "original" it saves is the Debug build it deployed on the first pass and the visit
+  history it just reset.
+
+The Discord one is now first-write-wins (Apply keeps an existing backup). The other two
+are not, on purpose: the backup has to be re-taken at the start of each *run*, and there
+is no marker distinguishing "second pass of this run" from "first pass of the next run".
+So the sweep runs `03` exactly once instead, and its header says why.
+
+The general shape: **a step that is idempotent in its effect is not necessarily idempotent
+in its bookkeeping.** Re-deploying the same DLL twice is harmless; re-recording what was
+there before it is not. Before putting an existing step in a loop, check every backup,
+snapshot and "original" it writes.
+
+## Re-running the roundtrip scenario inside one run can get the player killed
+
+`05-run-scenario.sh` spawns two traders at the player's position, records both, then
+teleports to one of them. It resolves which destination to teleport to by matching the
+trader's npc id, and that is only unambiguous because `03-deploy-mods.sh` reset the visit
+history first - at most one destination can exist per npc id.
+
+Run it a second time without that reset and the assumption is gone. The player has moved
+(the first pass teleported them), so the newly spawned traders record *new* destinations
+under the same npc ids, and the "second, distinct destination" the script picks to travel
+to may now be the one from the previous pass, far away. Teleporting somewhere unprepared
+is exactly how an earlier version of this scenario killed the player, and a death persists
+into every later run.
+
+That is why the language sweep runs `05` once and repeats only `05b` (which opens a dialog
+and seeds destinations client-side, and never teleports).
+
+## Every assertion passed; the screenshot showed the respawn screen
+
+A language sweep reported Polish green - 5 destinations on page 1, 2 on page 2, paging
+symmetric, no unresolved keys - and the screenshot was the death/respawn screen, with the
+dialog nowhere on it.
+
+The player had been killed while the sweep left them standing idle in the open world for
+twenty-odd minutes. Nothing in the dialog data reflects that: `vtttest dialog` drives the
+window group directly and reports what the dialog produced, which stays perfectly correct
+whether or not the game is actually drawing it. The captured screen is a different thing
+from the dialog's state, and only one of them was being checked.
+
+The same death also broke a *different* language in a way that looked unrelated:
+`paging_returns_same_page: false`, with page 1 having shifted by exactly one entry. The
+destination list is ordered by distance from the player, so the respawn moved the player
+and re-paged the list underneath the walkthrough.
+
+Two things came out of it:
+
+- **Assert the observer, not just the output.** `05b-run-dialog-scenario.sh` now reads the
+  player's state from vanilla `le` before and after the walkthrough, and `06-verify.sh`
+  fails the run if the player died or moved more than 2 m. Position is the stronger of the
+  two checks: it catches death, but also teleports and falls, and it is exactly the
+  variable the assertions silently depend on.
+- **A long unattended run is a hostile environment, and mitigation is not verification.**
+  The sweep now runs `killall` and `settime day` before each pass, which removes the usual
+  cause. That reduces how often it happens; it is the assertion above that stops it from
+  being believed when it does.

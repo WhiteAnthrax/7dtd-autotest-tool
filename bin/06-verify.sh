@@ -76,6 +76,9 @@ DIALOG_JSON="$(jq '
         [.entries[]
          | select(.text != null and (.text | test("vtt_[a-z0-9_]+")))
          | {id: .id, text: .text}];
+    def dist($a; $b):
+        (($a[0] - $b[0]) as $dx | ($a[1] - $b[1]) as $dy | ($a[2] - $b[2]) as $dz
+         | ($dx * $dx + $dy * $dy + $dz * $dz) | sqrt);
 
     (.destinations_per_page) as $per_page
     | (.seed_count - $per_page) as $page2_expected
@@ -89,11 +92,24 @@ DIALOG_JSON="$(jq '
         paging_returns_same_page: ((.dumps.page1 | dest_ids) == (.dumps.page1_again | dest_ids)),
         rendered_matches_logical: ((.dumps.page1 | rendered_ok) and (.dumps.page2 | rendered_ok)),
         unresolved_keys: ([.dumps[] | unresolved] | flatten),
+        requested_language: (.requested_language // ""),
         language: (.dumps.page1.language),
-        screenshots: (.screenshots | length)
+        screenshot_dir: (.screenshot_dir // null),
+        screenshots: (.screenshots | length),
+        player_alive: ((.player.before.dead | not) and (.player.after.dead | not)),
+        player_moved_m: (dist(.player.before.position; .player.after.position) | . * 100 | round / 100)
       }
     | .expected_page1_destinations = $per_page
     | .expected_page2_destinations = $page2_expected
+    # An unhonoured -language= argument is the one failure a localization run cannot
+    # afford to miss: the client falls back to its configured language and every other
+    # assertion still passes, so the run would certify text nobody ever looked at.
+    | .language_as_requested = (.requested_language == "" or .requested_language == .language)
+    # The destination list is ordered by distance from the player, so a player who moved
+    # mid-walkthrough re-pages the list underneath the assertions - and the usual reason
+    # they move is dying and respawning, which also puts the respawn UI over every
+    # screenshot taken afterwards. Neither shows up in the dialog data at all.
+    | .player_stayed_put = (.player_moved_m <= 2)
     | .ok = (
         .page1_destinations == $per_page
         and .page1_has_next
@@ -104,6 +120,9 @@ DIALOG_JSON="$(jq '
         and .paging_returns_same_page
         and .rendered_matches_logical
         and (.unresolved_keys | length) == 0
+        and .language_as_requested
+        and .player_alive
+        and .player_stayed_put
       )
 ' "$DIALOG_FILE")"
 

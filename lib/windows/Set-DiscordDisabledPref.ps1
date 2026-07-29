@@ -110,7 +110,15 @@ try {
         if ($backupDir -and -not (Test-Path $backupDir)) {
             New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
         }
-        $state | ConvertTo-Json -Compress | Set-Content -Path $BackupPath -Encoding UTF8
+        # Keep the first backup. Apply runs once per client launch, and a run that launches
+        # the client more than once (run-language-sweep.sh relaunches per language) would
+        # otherwise record the already-disabled state as the "original" on its second pass -
+        # leaving Discord permanently disabled after teardown restored it faithfully.
+        if (Test-Path $BackupPath) {
+            Write-Output 'BACKUP-KEPT'
+        } else {
+            $state | ConvertTo-Json -Compress | Set-Content -Path $BackupPath -Encoding UTF8
+        }
 
         $key.SetValue($dwordName, 1, [Microsoft.Win32.RegistryValueKind]::DWord)
 
