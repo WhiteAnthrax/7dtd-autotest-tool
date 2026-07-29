@@ -159,6 +159,12 @@ Two assertions matter most here and both are mechanical:
   `06-verify.sh` compares the requested language against the one the game reports.
 - **No raw `vtt_*` key reached the screen.** That is what a missing translation cell looks
   like from the outside.
+- **The player was alive and stood still the whole time.** A sweep leaves an idle player
+  in the open world for half an hour; one that gets killed respawns somewhere else, which
+  re-orders the distance-sorted destination list and puts the respawn UI over every
+  screenshot afterwards - while the dialog data stays perfectly correct. The sweep runs
+  `killall` and `settime day` before each pass to make that unlikely, and `06-verify.sh`
+  fails the run if it happens anyway.
 
 What the assertions can't see is length. German and Russian run noticeably longer than
 English, and clipped or wrapped text is still perfectly correct data - so look at the

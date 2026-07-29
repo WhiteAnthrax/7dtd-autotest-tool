@@ -435,3 +435,32 @@ into every later run.
 
 That is why the language sweep runs `05` once and repeats only `05b` (which opens a dialog
 and seeds destinations client-side, and never teleports).
+
+## Every assertion passed; the screenshot showed the respawn screen
+
+A language sweep reported Polish green - 5 destinations on page 1, 2 on page 2, paging
+symmetric, no unresolved keys - and the screenshot was the death/respawn screen, with the
+dialog nowhere on it.
+
+The player had been killed while the sweep left them standing idle in the open world for
+twenty-odd minutes. Nothing in the dialog data reflects that: `vtttest dialog` drives the
+window group directly and reports what the dialog produced, which stays perfectly correct
+whether or not the game is actually drawing it. The captured screen is a different thing
+from the dialog's state, and only one of them was being checked.
+
+The same death also broke a *different* language in a way that looked unrelated:
+`paging_returns_same_page: false`, with page 1 having shifted by exactly one entry. The
+destination list is ordered by distance from the player, so the respawn moved the player
+and re-paged the list underneath the walkthrough.
+
+Two things came out of it:
+
+- **Assert the observer, not just the output.** `05b-run-dialog-scenario.sh` now reads the
+  player's state from vanilla `le` before and after the walkthrough, and `06-verify.sh`
+  fails the run if the player died or moved more than 2 m. Position is the stronger of the
+  two checks: it catches death, but also teleports and falls, and it is exactly the
+  variable the assertions silently depend on.
+- **A long unattended run is a hostile environment, and mitigation is not verification.**
+  The sweep now runs `killall` and `settime day` before each pass, which removes the usual
+  cause. That reduces how often it happens; it is the assertion above that stops it from
+  being believed when it does.

@@ -139,6 +139,24 @@ resolve_trader_id() {
     printf '%s' "$id"
 }
 
+# make_world_safe: clears hostiles and puts the clock in daylight before the walkthrough.
+#
+# A sweep parks an idle player in the open world for the best part of half an hour, which
+# is long enough to be killed - and a death mid-walkthrough is not a harmless one. The
+# respawn moves the player, which re-orders the distance-sorted destination list, and it
+# covers every subsequent screenshot with the respawn UI. Both were observed.
+#
+# This is mitigation, not a guarantee; the assertion that actually catches a death is
+# `player_alive`/`player_stayed_put` in 06-verify.sh. Failures here are logged and ignored
+# so a console command that a future game version renames cannot fail the sweep.
+make_world_safe() {
+    local out
+    for cmd in "killall" "settime day"; do
+        out="$(submit_and_check "$cmd" | jq -r '.output' | head -2 | tr '\n' ' ' || true)"
+        log "world-safety: ${cmd} -> ${out:-<no output>}"
+    done
+}
+
 STEP_STATUS="unknown"
 "$BIN_DIR/01-start-server.sh" "$PROFILE" || STEP_STATUS="start-server failed"
 if [ "$STEP_STATUS" = "unknown" ]; then
@@ -163,6 +181,10 @@ if [ "$STEP_STATUS" = "unknown" ]; then
         if ! CLIENT_LANGUAGE="$lang" "$BIN_DIR/04-launch-client.sh" "$PROFILE"; then
             LANG_STATUS="launch-client failed"
         fi
+
+        # Before 05, not after: killall clears the traders too, so anything spawned after
+        # this point survives into the walkthrough.
+        [ "$LANG_STATUS" = "ok" ] && make_world_safe
 
         if [ "$LANG_STATUS" = "ok" ] && [ "$SCENARIO_DONE" = "0" ]; then
             if "$BIN_DIR/05-run-scenario.sh" "$PROFILE"; then
