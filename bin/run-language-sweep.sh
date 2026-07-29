@@ -41,7 +41,7 @@ ALL_LANGUAGES="english,german,spanish,french,italian,japanese,koreana,polish,bra
 
 usage() {
     cat <<EOF
-Usage: $0 --profile <v3|v26> [--languages a,b,c]
+Usage: $0 --profile <v3|v26> [--languages a,b,c] [--fresh-save] [--keep-save]
 
 Walks the trader dialog once per UI language and keeps a screenshot of every step, so a
 localization change can be checked for clipped or untranslated text.
@@ -49,6 +49,12 @@ localization change can be checked for clipped or untranslated text.
   --profile <name>     Which config/<name>.env to run against.
   --languages a,b,c    Comma-separated languages to sweep, in order. Default: all of
                        ${ALL_LANGUAGES}.
+  --fresh-save         Run against a throwaway save, as run-roundtrip.sh does. Worth
+                       reaching for here: a sweep is half an hour of idle player, and a
+                       save carrying a dead character from an earlier run fails every
+                       single language (the walkthrough asserts the player is alive, and
+                       no console command revives them).
+  --keep-save          With --fresh-save, keep the throwaway save afterwards.
 
 Results land in output/<profile>/:
   screenshots/<language>/*.jpg   what the client drew, per language
@@ -62,6 +68,8 @@ EOF
 
 PROFILE=""
 LANGUAGES_CSV="$ALL_LANGUAGES"
+FRESH_SAVE=0
+KEEP_SAVE=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --profile)
@@ -71,6 +79,14 @@ while [ $# -gt 0 ]; do
         --languages)
             LANGUAGES_CSV="${2:-}"
             shift 2
+            ;;
+        --fresh-save)
+            FRESH_SAVE=1
+            shift
+            ;;
+        --keep-save)
+            KEEP_SAVE=1
+            shift
             ;;
         -h|--help)
             usage
@@ -93,9 +109,13 @@ for lang in "${LANGUAGES[@]}"; do
     esac
 done
 
-# The sweep reuses the profile's persistent save, the same as an ordinary roundtrip.
-export TESTPILOT_FRESH_SAVE=0
-export TESTPILOT_KEEP_SAVE=0
+if [ "$KEEP_SAVE" = "1" ] && [ "$FRESH_SAVE" = "0" ]; then
+    die "--keep-save only makes sense together with --fresh-save"
+fi
+
+# The numbered steps take just a profile, so the mode reaches them as environment.
+export TESTPILOT_FRESH_SAVE="$FRESH_SAVE"
+export TESTPILOT_KEEP_SAVE="$KEEP_SAVE"
 
 load_profile "$PROFILE"
 

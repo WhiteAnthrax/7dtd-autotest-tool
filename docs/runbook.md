@@ -135,9 +135,13 @@ spend time chasing them.
 ## Checking every language
 
 ```bash
-./bin/run-language-sweep.sh --profile v3                            # all 13 languages
+./bin/run-language-sweep.sh --profile v3 --fresh-save               # all 13 languages
 ./bin/run-language-sweep.sh --profile v3 --languages german,russian # just these
 ```
+
+Prefer `--fresh-save` here. A sweep is half an hour of idle player, and if a previous run
+left the character dead that death is in the save - which now fails *every* language,
+because the walkthrough asserts the player is alive and nothing revives them.
 
 Watch for `LANGUAGE_SWEEP_RESULT {"profile":"v3","status":"ok","ok":true,"failed":[]}`.
 
