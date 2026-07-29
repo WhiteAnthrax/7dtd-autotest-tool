@@ -464,3 +464,52 @@ Two things came out of it:
   The sweep now runs `killall` and `settime day` before each pass, which removes the usual
   cause. That reduces how often it happens; it is the assertion above that stops it from
   being believed when it does.
+
+## The pipeline verifies a Debug build; users get a Release build
+
+Everything here - the roundtrip, the dialog walkthrough, the language sweep - runs against
+a **Debug** build, because `vtttest` and `vtttest dialog` only exist when
+`VTT_TEST_HARNESS` is defined, which `VisitedTraderTeleport.csproj` does only for
+`Configuration=Debug`. What ships is a Release build, which by design has no harness at
+all. So the artifact users download is the one thing that never gets driven.
+
+This surfaced the worst possible way: at release time, after publishing, as "wait, did we
+verify the thing we actually shipped?" The answer was no, and finding out cost a
+post-hoc scramble instead of a scripted check.
+
+What transfers from a Debug run and what does not is worth being precise about:
+
+- **The `Config/` files do transfer, if you check they are the same bytes.** The
+  translations live entirely in `Config/Localization.csv`; the DLL only looks keys up. The
+  packaged Config can be compared byte-for-byte against `output/<profile>/mod-config/`,
+  which is what the sweep actually deployed. That is a real check, not a hand-wave - do it
+  rather than assume the commits match, and compare against the *deployed* copy rather
+  than `git show`, whose LF form differs from the CRLF working-tree form.
+- **The production code is the same source.** `VTT_TEST_HARNESS` wraps only the three files
+  under `src/VisitedTraderTeleport/Testing/`, and no production file has any conditional
+  compilation - worth re-checking with a grep rather than believing this note.
+- **The Release binary itself transfers nothing.** It was never loaded. Deploy the packaged
+  zip to a server, start it, and confirm the mod loads and no exception is thrown. That is
+  cheap and it is the only evidence that the shipped DLL runs at all. `PatchAll` is not
+  wrapped in try/catch, so a Harmony patch that no longer applies shows up as an exception
+  at mod load rather than as silently missing behavior.
+- **What still cannot be checked mechanically is the Release build's UI.** Driving the
+  dialog needs the harness, and the harness is not in the shipped build. Closing that
+  properly means putting a *generic* dialog-open/select capability in `SdtdTestPilot` -
+  which is a separate mod, so it can drive a Release build of the mod under test.
+
+## `rm -rf <dir>` you don't own the parent of, then `cp -a src dst`, nests instead of replaces
+
+Replacing a deployed mod folder on the v2.6 server with `rm -rf "$S"; cp -a "$D" "$S"` left
+`Mods/VisitedTraderTeleport/VisitedTraderTeleport/` - a broken install - and the server was
+started on it before anyone noticed.
+
+`Mods/` there is owned by the container's uid, not the invoking user. `rm -rf` could delete
+the directory's *contents* but not the directory itself, so it emptied the folder, failed,
+and left it in place. `cp -a src dst` then copied *into* the surviving directory instead of
+becoming it.
+
+Replace contents, never the directory: `rm -rf "$S"/*` followed by `cp -a "$B"/. "$S"/`.
+That is already what `03-deploy-mods.sh` does for the server-side `Config/`, and it works
+whether or not the parent is writable. And verify afterwards - `diff -r` against the backup
+takes a second and is the difference between a restored server and a quietly broken one.

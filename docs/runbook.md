@@ -240,6 +240,39 @@ a perfectly good way to run them. They only cover the engine-independent
 `SdtdTestPilot.Core` bits, so anything touching the pipeline itself still deserves a real
 `./bin/run-roundtrip.sh --profile v3`.
 
+## What this pipeline does *not* verify
+
+Every stage here runs against a **Debug** build. It has to: `vtttest` and `vtttest dialog`
+only exist when `VTT_TEST_HARNESS` is defined, and `VisitedTraderTeleport.csproj` defines
+it only for `Configuration=Debug`. Releases ship a Release build with no harness in it.
+
+So a green roundtrip and a green language sweep say nothing about the packaged zip on
+their own. Before releasing, close the gap explicitly:
+
+1. **Compare the packaged `Config/` against what was actually deployed.** The translations
+   live entirely in these files, so this is what carries the sweep's result over to the
+   release:
+   ```bash
+   unzip -q dist/VisitedTraderTeleport-<version>.zip -d /tmp/rel
+   diff -r output/<profile>/mod-config /tmp/rel/VisitedTraderTeleport/Config
+   ```
+   Compare against `output/<profile>/mod-config/`, not `git show` - the latter hands back
+   the LF form while the packaged files are CRLF, so everything looks different.
+2. **Boot a server on the packaged build.** Deploy the zip's contents to a disposable
+   server's `Mods/`, start it, and check the log:
+   ```
+   [MODS]     Loaded Mod: VisitedTraderTeleport (<version>)
+   [MODS] Loading localization from mod: VisitedTraderTeleport
+   ```
+   with no `Exception` anywhere. `PatchAll` is not wrapped in try/catch, so a Harmony patch
+   that no longer applies throws at mod load rather than going quietly missing.
+
+   Replace the *contents*, not the directory (`rm -rf "$dir"/*` then `cp -a src/. "$dir"/`)
+   and `diff -r` against your backup when restoring - see `docs/lessons-learned.md`.
+
+What neither step covers is the Release build's dialog actually rendering. That needs a
+harness the shipped build deliberately doesn't have.
+
 ## Troubleshooting
 
 If a run leaves things in a bad state (killed mid-run, `run-roundtrip.sh`'s process was
