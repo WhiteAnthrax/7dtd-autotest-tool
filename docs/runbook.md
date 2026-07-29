@@ -259,3 +259,19 @@ no VisitedTraderTeleportData.json found under ... for save name 'AutotestSafeFre
 
 Delete the file to go back to the profile's persistent save. A full `run-roundtrip.sh`
 needs no cleanup either way - `01` clears it at the start of every run.
+
+**`--fresh-save` fails immediately on a server whose config you don't own.**
+
+```
+ERROR: bin/01-start-server.sh:53 failed (exit 4): sed -i -E "s|(<property name=\"GameName\"...
+```
+
+`--fresh-save` rewrites `GameName` in the server's `sdtdserver.xml` for the run, so the
+account running the pipeline has to be able to write that file. Compose projects differ:
+one may leave `serverfiles/` owned by your user, another by the container's uid, and
+`sdtdserver.xml` is mode 644/755 either way - so the same flag works for one profile and
+not another. Check with `ls -l <DOCKER_COMPOSE_DIR>/data/serverfiles/sdtdserver.xml`.
+
+Without it, run against the profile's persistent save. That is fine for a roundtrip, and
+for a language sweep it just means the player has to survive the run on their own - which
+`06-verify.sh` checks rather than assumes.
