@@ -46,6 +46,20 @@ testpilot_reset_queue
 EXE_PATH="${CLIENT_GAME_PATH}\\${CLIENT_EXE_NAME}"
 ARGS="-SkipNewsScreen=true -testpilot.mode=connect -testpilot.ip=${SERVER_IP} -testpilot.port=${SERVER_PORT} -testpilot.queue=${OMEN_QUEUE_DIR} -testpilot.readytimeout=${READY_TIMEOUT_SECONDS}"
 
+# CLIENT_LANGUAGE picks the game's UI language for this launch. It is the game's own
+# `-language=<name>` launch argument (Localization.RequestedLanguage reads it through
+# GameUtils.GetLaunchArgument), not a testpilot one, and the name is the column name from
+# Localization.csv: english, german, japanese, schinese, ... Leave it empty to let the
+# client use whatever language it is configured with.
+#
+# The language cannot be changed without restarting the client, which is why the sweep in
+# 08-language-sweep.sh relaunches rather than switching in place.
+CLIENT_LANGUAGE="${CLIENT_LANGUAGE:-}"
+if [ -n "$CLIENT_LANGUAGE" ]; then
+    ARGS="$ARGS -language=${CLIENT_LANGUAGE}"
+    log "launching with UI language '${CLIENT_LANGUAGE}'"
+fi
+
 log "launching client via scheduled task '$OMEN_TASK_NAME'..."
 run_on_omen_script "$ROOT_DIR/lib/windows/Start-TestPilotClient.ps1" \
     -ExePath "\"${EXE_PATH}\"" \

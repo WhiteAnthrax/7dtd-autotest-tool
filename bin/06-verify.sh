@@ -89,11 +89,17 @@ DIALOG_JSON="$(jq '
         paging_returns_same_page: ((.dumps.page1 | dest_ids) == (.dumps.page1_again | dest_ids)),
         rendered_matches_logical: ((.dumps.page1 | rendered_ok) and (.dumps.page2 | rendered_ok)),
         unresolved_keys: ([.dumps[] | unresolved] | flatten),
+        requested_language: (.requested_language // ""),
         language: (.dumps.page1.language),
+        screenshot_dir: (.screenshot_dir // null),
         screenshots: (.screenshots | length)
       }
     | .expected_page1_destinations = $per_page
     | .expected_page2_destinations = $page2_expected
+    # An unhonoured -language= argument is the one failure a localization run cannot
+    # afford to miss: the client falls back to its configured language and every other
+    # assertion still passes, so the run would certify text nobody ever looked at.
+    | .language_as_requested = (.requested_language == "" or .requested_language == .language)
     | .ok = (
         .page1_destinations == $per_page
         and .page1_has_next
@@ -104,6 +110,7 @@ DIALOG_JSON="$(jq '
         and .paging_returns_same_page
         and .rendered_matches_logical
         and (.unresolved_keys | length) == 0
+        and .language_as_requested
       )
 ' "$DIALOG_FILE")"
 

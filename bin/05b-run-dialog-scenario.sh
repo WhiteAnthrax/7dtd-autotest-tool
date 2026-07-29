@@ -51,21 +51,27 @@ SCENARIO_FILE="$OUTPUT_DIR/scenario-result.json"
 # Reuse the trader 05 already spawned and recorded. Talking to a *new* trader would make
 # DialogGetFirstStatementPatch record another visit and change the server-side data 06
 # checks; reusing this one keeps the dialog walkthrough side-effect free.
-TRADER_ID="$(jq -r '.trader_entity_ids.npcTraderBob' "$SCENARIO_FILE")"
+#
+# VTT_DIALOG_TRADER_ID overrides it. run-language-sweep.sh sets it because entity ids are
+# resolved per client session there: 05 runs once for the whole sweep, and by the time a
+# later language's client has reconnected the id in scenario-result.json may no longer
+# name a live entity.
+TRADER_ID="${VTT_DIALOG_TRADER_ID:-}"
+if [ -z "$TRADER_ID" ]; then
+    TRADER_ID="$(jq -r '.trader_entity_ids.npcTraderBob' "$SCENARIO_FILE")"
+fi
 if [ -z "$TRADER_ID" ] || [ "$TRADER_ID" = "null" ]; then
     die "could not read npcTraderBob's entity id from $SCENARIO_FILE"
 fi
 
 REMOTE_SHOT_DIR="${OMEN_SCRATCH_DIR}\\screenshots"
-LOCAL_SHOT_DIR="$OUTPUT_DIR/screenshots"
+# Filled in below, once the game has told us which language it actually loaded.
+LOCAL_SHOT_DIR=""
 
-# Start from an empty screenshot dir on both ends. Stale images from an earlier run are
-# worse than none at all here: they are collected as this run's evidence and would be
-# read as proof of something that never happened.
-log "clearing screenshot directories..."
-run_on_omen_cmd "Remove-Item '${REMOTE_SHOT_DIR}' -Recurse -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force -Path '${REMOTE_SHOT_DIR}' | Out-Null"
-rm -rf "$LOCAL_SHOT_DIR"
-mkdir -p "$LOCAL_SHOT_DIR"
+# What 04-launch-client.sh was asked to launch with, if anything. Recorded in the result
+# so 06-verify.sh can check the game honoured it - a client that quietly fell back to
+# English would otherwise produce a perfectly green "localization test".
+REQUESTED_LANGUAGE="${CLIENT_LANGUAGE:-}"
 
 SHOT_NAMES=()
 
@@ -108,6 +114,20 @@ dialog_dump() {
 log "step: vtttest dialog open $TRADER_ID (npcTraderBob)"
 dialog_cmd open "$TRADER_ID" >/dev/null
 DUMP_START="$(dialog_dump)"
+
+# Screenshots are filed under the language the game reports, not the one we asked for, so
+# a sweep over several languages can't mislabel its own evidence.
+ACTIVE_LANGUAGE="$(printf '%s' "$DUMP_START" | jq -r '.language // "unknown"')"
+LOCAL_SHOT_DIR="$OUTPUT_DIR/screenshots/$ACTIVE_LANGUAGE"
+
+# Start from an empty screenshot dir on both ends. Stale images from an earlier run are
+# worse than none at all here: they are collected as this run's evidence and would be
+# read as proof of something that never happened.
+log "clearing screenshot directories (language: ${ACTIVE_LANGUAGE})..."
+run_on_omen_cmd "Remove-Item '${REMOTE_SHOT_DIR}' -Recurse -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force -Path '${REMOTE_SHOT_DIR}' | Out-Null"
+rm -rf "$LOCAL_SHOT_DIR"
+mkdir -p "$LOCAL_SHOT_DIR"
+
 take_screenshot "01-dialog-start"
 
 # Seed AFTER opening: DialogGetFirstStatementPatch.Postfix requests a fresh snapshot when
@@ -144,6 +164,8 @@ SHOTS_JSON="$(printf '%s\n' "${SHOT_NAMES[@]}" | jq -R . | jq -s 'map(. + ".jpg"
 
 jq -n \
     --arg trader_entity_id "$TRADER_ID" \
+    --arg requested_language "$REQUESTED_LANGUAGE" \
+    --arg screenshot_dir "${LOCAL_SHOT_DIR#"$ROOT_DIR/"}" \
     --argjson seed_count "$SEED_COUNT" \
     --argjson destinations_per_page "$DESTINATIONS_PER_PAGE" \
     --argjson start "$DUMP_START" \
@@ -153,6 +175,8 @@ jq -n \
     --argjson screenshots "$SHOTS_JSON" \
     '{
         trader_entity_id: $trader_entity_id,
+        requested_language: $requested_language,
+        screenshot_dir: $screenshot_dir,
         seed_count: $seed_count,
         destinations_per_page: $destinations_per_page,
         dumps: {start: $start, page1: $page1, page2: $page2, page1_again: $page1_again},
