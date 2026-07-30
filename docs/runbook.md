@@ -258,13 +258,25 @@ Run this on the ZIP before publishing it:
 
 Watch for `RELEASE_VERIFICATION_RESULT {... "packaged_config":"identical","ok":true ...}`.
 
-It installs the ZIP on the server and client in place of the Debug build and walks the real
-trader dialog against it - driving the dialog from `SdtdTestPilot`, which is a separate mod
-and therefore works against any build of the mod under test. Per language it checks that the
-travel option is offered, that the destination list has the expected entries, that nothing
-the mod produced was dropped before it reached the screen, that no raw `vtt_` key leaked
-through, that the client honoured the requested language, and that the player stayed alive
-and still. Screenshots land in `output/<profile>/screenshots/<language>/`.
+It installs the ZIP on the server and client in place of the Debug build and drives it from
+`SdtdTestPilot`, which is a separate mod and therefore works against any build of the mod
+under test. Two things get checked:
+
+- **What it renders**, per language: the travel option is offered, the destination list has
+  the expected entries, nothing the mod produced was dropped before it reached the screen,
+  no raw `vtt_` key leaked through, the client honoured the requested language, and the
+  player stayed alive and still. Screenshots land in
+  `output/<profile>/screenshots/<language>/`.
+- **What it does**, once: a real trip, chosen from the dialog exactly the way a player picks
+  it. The verdict comes from the *server* rather than from the build reporting on itself -
+  `VisitedTraderTeleportService` logs `Teleported` on success and `Teleport failed:`
+  otherwise, so the run asserts one `Teleported`, no failure, no exception, the visit
+  records still in the save, and the player alive at the end. Screenshots in
+  `output/<profile>/screenshots/travel/`.
+
+That second part is what a screenshot cannot reach: the store, key canonicalization, travel
+readiness and cost logic all moved into `VisitedTraderTeleport.Core` between 0.7.9 and
+0.7.10, and a localization release can quietly carry that kind of change.
 
 It also compares the packaged `Config/` against `output/<profile>/mod-config/` - the copy
 the sweep actually deployed - byte for byte, and fails the run if they differ. That

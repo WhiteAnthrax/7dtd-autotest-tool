@@ -535,3 +535,20 @@ precise, and it stays correct on a statement full of unrelated conditional respo
 
 The general rule this is the second instance of: when a check goes red against something
 that has been verified another way, suspect the check first.
+
+## A localization release was not a localization-only release
+
+Before publishing 0.7.10, `git diff --stat v0.7.9..v0.7.10 -- src mod` was the cheapest
+useful thing anyone did all day. The translation work was the visible change, but the tag
+also carried four unreleased refactors that had moved the visit store, trader key
+canonicalization, travel cost and travel readiness into `VisitedTraderTeleport.Core` -
+`VisitedTraderStore.cs` alone lost 404 lines.
+
+The v2.6 release next to it was genuinely localization-only: its diff was the localization
+file, `ModInfo.xml`, and test files behind `#if VTT_TEST_HARNESS`. Same day, same kind of
+work, completely different risk.
+
+So: **diff the tag against the previous tag before calling a release safe**, and scope the
+verification to what actually changed rather than to what you were working on. Screenshots
+of translated text say nothing about a refactor of the code behind them; that is what
+`05t-run-release-travel-scenario.sh` exists for.
