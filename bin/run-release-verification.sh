@@ -149,6 +149,7 @@ RESULTS_JSON="[]"
 if [ "$STEP_STATUS" = "unknown" ]; then
     STEP_STATUS="ok"
     FIRST=1
+    TRAVEL_DONE=0
     for lang in "${LANGUAGES[@]}"; do
         log "=== language: ${lang} ==="
         [ "$FIRST" = "1" ] || stop_client
@@ -164,6 +165,18 @@ if [ "$STEP_STATUS" = "unknown" ]; then
         fi
         if [ "$LANG_STATUS" = "ok" ] && ! "$BIN_DIR/06r-verify-release.sh" "$PROFILE"; then
             LANG_STATUS="verify failed"
+        fi
+
+        # Travel runs once, on the first language. It checks behaviour rather than text, so
+        # repeating it per language would only re-prove the same thing - and every extra run
+        # is another trip the player has to survive.
+        if [ "$LANG_STATUS" = "ok" ] && [ "$TRAVEL_DONE" = "0" ]; then
+            if "$BIN_DIR/05t-run-release-travel-scenario.sh" "$PROFILE" \
+                && "$BIN_DIR/06t-verify-release-travel.sh" "$PROFILE"; then
+                TRAVEL_DONE=1
+            else
+                LANG_STATUS="release travel verification failed"
+            fi
         fi
 
         [ -f "$OUTPUT_DIR/release-dialog-result.json" ] && cp "$OUTPUT_DIR/release-dialog-result.json" "$OUTPUT_DIR/release-dialog-${lang}.json"
@@ -189,7 +202,7 @@ if [ "$STEP_STATUS" = "unknown" ]; then
 fi
 
 RUN_OK=false
-if [ "$STEP_STATUS" = "ok" ] && [ "$CONFIG_MATCH" = "identical" ] && \
+if [ "$STEP_STATUS" = "ok" ] && [ "$CONFIG_MATCH" = "identical" ] && [ "${TRAVEL_DONE:-0}" = "1" ] && \
    [ "$(printf '%s' "$RESULTS_JSON" | jq '[.[] | select(.ok | not)] | length')" = "0" ] && \
    [ "$(printf '%s' "$RESULTS_JSON" | jq 'length')" != "0" ]; then
     RUN_OK=true
@@ -197,8 +210,9 @@ fi
 
 jq -n --arg profile "$PROFILE" --arg package "$(basename "$PACKAGE")" --arg status "$STEP_STATUS" \
     --arg config_match "$CONFIG_MATCH" --argjson languages "$RESULTS_JSON" --argjson ok "$RUN_OK" \
+    --argjson travel "$( [ "${TRAVEL_DONE:-0}" = "1" ] && cat "$OUTPUT_DIR/release-travel-verify.json" || echo null )" \
     '{profile: $profile, package: $package, status: $status, packaged_config: $config_match,
-      ok: $ok, languages: $languages}' > "$RESULT_FILE"
+      ok: $ok, travel: $travel, languages: $languages}' > "$RESULT_FILE"
 
 echo "RELEASE_VERIFICATION_RESULT $(jq -c '{profile, package, status, packaged_config, ok, failed: [.languages[] | select(.ok | not) | .language]}' "$RESULT_FILE")"
 
