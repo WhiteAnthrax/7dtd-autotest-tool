@@ -9,8 +9,10 @@
 #   - destinations are real, recorded by opening each trader's dialog, because seeding
 #     needs the mod's internals;
 #   - there are five of them (the five vanilla trader prefabs, all recorded at the player's
-#     own position - distinct because a destination key carries the trader's npc id), which
-#     is one page exactly, so paging rows are out of scope here;
+#     own position - distinct because a destination key carries the trader's npc id), and
+#     the list shows four: the mod filters out the trader you are currently talking to
+#     (DialogPatches' IsSameTrader), since travelling to where you already stand is not a
+#     destination. Four fits one page, so paging rows are out of scope here;
 #   - what it does prove is the thing nothing else can: that the shipped binary loads its
 #     Config, runs its dialog patches, and renders localized text.
 #
@@ -172,7 +174,7 @@ TRADERS_JSON="$(printf '%s\n' "${TRADER_IDS[@]}" | jq -R . | jq -s .)"
 jq -n \
     --arg requested_language "$REQUESTED_LANGUAGE" \
     --arg screenshot_dir "${LOCAL_SHOT_DIR#"$ROOT_DIR/"}" \
-    --argjson expected_destinations "${#TRADER_PREFABS[@]}" \
+    --argjson expected_destinations "$((${#TRADER_PREFABS[@]} - 1))" \
     --argjson trader_entity_ids "$TRADERS_JSON" \
     --argjson start "$DUMP_START" \
     --argjson destinations "$DUMP_DESTINATIONS" \

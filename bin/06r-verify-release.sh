@@ -39,7 +39,19 @@ VERDICT="$(jq '
                   and . != "vtt_destination_page_next"
                   and . != "vtt_destination_page_previous")];
     def has_id($id): [.entries[].id] | any(. == $id);
-    def rendered_ok: (.rendered | length) == (.entries | length);
+    # NOT "rendered length == entries length". DialogStatement.GetResponses returns every
+    # response defined on the statement, including ones the game then hides because their
+    # conditions do not hold: the vanilla trader start statement carries a dozen job
+    # responses of which three render. Comparing the two counts reports that as truncation.
+    # 06-verify.sh can compare them only because the statement it looks at is entirely
+    # mod-generated.
+    #
+    # The truncation worth catching is a skin with fewer response slots dropping entries the
+    # mod produced, so check exactly that: every vtt_ entry reached the screen.
+    # (No apostrophes in here - the whole program is inside a single-quoted shell string.)
+    def mod_entry_ids: [.entries[].id | select(. != null) | select(startswith("vtt_"))];
+    def mod_entries_rendered:
+        (mod_entry_ids - .rendered) | length == 0;
     def unresolved:
         [.entries[]
          | select(.text != null and (.text | test("vtt_[a-z0-9_]+")))
@@ -53,7 +65,8 @@ VERDICT="$(jq '
         travel_option_offered: (.dumps.start | has_id("vtt_open")),
         destinations: (.dumps.destinations | dest_ids | length),
         expected_destinations: $expected,
-        rendered_matches_logical: ((.dumps.start | rendered_ok) and (.dumps.destinations | rendered_ok)),
+        mod_entries_all_rendered: ((.dumps.start | mod_entries_rendered) and (.dumps.destinations | mod_entries_rendered)),
+        dropped_entries: ([.dumps[] | (mod_entry_ids - .rendered)] | flatten),
         unresolved_keys: ([.dumps[] | unresolved] | flatten),
         requested_language: (.requested_language // ""),
         language: (.dumps.destinations.language),
@@ -67,7 +80,7 @@ VERDICT="$(jq '
     | .ok = (
         .travel_option_offered
         and .destinations == $expected
-        and .rendered_matches_logical
+        and .mod_entries_all_rendered
         and (.unresolved_keys | length) == 0
         and .language_as_requested
         and .player_alive
