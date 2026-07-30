@@ -513,3 +513,25 @@ Replace contents, never the directory: `rm -rf "$S"/*` followed by `cp -a "$B"/.
 That is already what `03-deploy-mods.sh` does for the server-side `Config/`, and it works
 whether or not the parent is writable. And verify afterwards - `diff -r` against the backup
 takes a second and is the difference between a restored server and a quietly broken one.
+
+## Two red assertions, both the harness being wrong
+
+The first run of the release-package walkthrough failed on two counts, and neither was the
+mod:
+
+- **`destinations: 4` where 5 traders had been recorded.** The mod filters out the trader
+  you are currently talking to (`DialogPatches`' `IsSameTrader`) - travelling to where you
+  already stand is not a destination. The expectation was wrong, not the list.
+- **`rendered` shorter than `entries`.** `DialogStatement.GetResponses()` returns every
+  response *defined* on the statement, including ones the game then hides because their
+  conditions do not hold. A vanilla trader start statement carries 13 and renders 3. The
+  count comparison that works fine on the mod's own fully-generated statement reports that
+  as silent truncation.
+
+Both were found by printing the dump instead of trusting the verdict. The fix for the second
+one is worth keeping: the property actually wanted is not "nothing was dropped" but "nothing
+*the mod produced* was dropped", i.e. every `vtt_` entry appears in `rendered`. That is
+precise, and it stays correct on a statement full of unrelated conditional responses.
+
+The general rule this is the second instance of: when a check goes red against something
+that has been verified another way, suspect the check first.

@@ -240,38 +240,41 @@ a perfectly good way to run them. They only cover the engine-independent
 `SdtdTestPilot.Core` bits, so anything touching the pipeline itself still deserves a real
 `./bin/run-roundtrip.sh --profile v3`.
 
-## What this pipeline does *not* verify
+## Verifying a release package
 
-Every stage here runs against a **Debug** build. It has to: `vtttest` and `vtttest dialog`
-only exist when `VTT_TEST_HARNESS` is defined, and `VisitedTraderTeleport.csproj` defines
-it only for `Configuration=Debug`. Releases ship a Release build with no harness in it.
+The roundtrip and the language sweep run against a **Debug** build. They have to: `vtttest`
+and `vtttest dialog` only exist when `VTT_TEST_HARNESS` is defined, and
+`VisitedTraderTeleport.csproj` defines it only for `Configuration=Debug`. What ships is a
+Release build with no harness in it, so a green sweep says nothing about the packaged zip
+on its own.
 
-So a green roundtrip and a green language sweep say nothing about the packaged zip on
-their own. Before releasing, close the gap explicitly:
+Run this on the ZIP before publishing it:
 
-1. **Compare the packaged `Config/` against what was actually deployed.** The translations
-   live entirely in these files, so this is what carries the sweep's result over to the
-   release:
-   ```bash
-   unzip -q dist/VisitedTraderTeleport-<version>.zip -d /tmp/rel
-   diff -r output/<profile>/mod-config /tmp/rel/VisitedTraderTeleport/Config
-   ```
-   Compare against `output/<profile>/mod-config/`, not `git show` - the latter hands back
-   the LF form while the packaged files are CRLF, so everything looks different.
-2. **Boot a server on the packaged build.** Deploy the zip's contents to a disposable
-   server's `Mods/`, start it, and check the log:
-   ```
-   [MODS]     Loaded Mod: VisitedTraderTeleport (<version>)
-   [MODS] Loading localization from mod: VisitedTraderTeleport
-   ```
-   with no `Exception` anywhere. `PatchAll` is not wrapped in try/catch, so a Harmony patch
-   that no longer applies throws at mod load rather than going quietly missing.
+```bash
+./bin/run-release-verification.sh --profile v3 \
+    --package dist/VisitedTraderTeleport-0.7.10.zip \
+    --languages german,japanese --fresh-save
+```
 
-   Replace the *contents*, not the directory (`rm -rf "$dir"/*` then `cp -a src/. "$dir"/`)
-   and `diff -r` against your backup when restoring - see `docs/lessons-learned.md`.
+Watch for `RELEASE_VERIFICATION_RESULT {... "packaged_config":"identical","ok":true ...}`.
 
-What neither step covers is the Release build's dialog actually rendering. That needs a
-harness the shipped build deliberately doesn't have.
+It installs the ZIP on the server and client in place of the Debug build and walks the real
+trader dialog against it - driving the dialog from `SdtdTestPilot`, which is a separate mod
+and therefore works against any build of the mod under test. Per language it checks that the
+travel option is offered, that the destination list has the expected entries, that nothing
+the mod produced was dropped before it reached the screen, that no raw `vtt_` key leaked
+through, that the client honoured the requested language, and that the player stayed alive
+and still. Screenshots land in `output/<profile>/screenshots/<language>/`.
+
+It also compares the packaged `Config/` against `output/<profile>/mod-config/` - the copy
+the sweep actually deployed - byte for byte, and fails the run if they differ. That
+comparison is what carries the sweep's result over to the release: the translations live
+entirely in those files and the DLL only looks keys up. (Compare against the deployed copy,
+never `git show`, whose LF form differs from the CRLF packaged one.)
+
+What it deliberately does not cover is paging. Seeding a long destination list needs the
+mod's internals, so the five real traders it records give one page. Paging boundaries stay
+the Debug sweep's job, and they transfer precisely because the packaged `Config/` matches.
 
 ## Troubleshooting
 
