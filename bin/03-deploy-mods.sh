@@ -145,7 +145,10 @@ copy_to_omen "$VTT_DLL_SRC" "${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll"
 if [ "$DEPLOY_TEST_HARNESS" = "1" ]; then
     run_on_omen_cmd "New-Item -ItemType File -Force -Path '${CLIENT_VTT_DIR}\\EnableTestHarness.txt' | Out-Null"
 else
-    run_on_omen_cmd "Remove-Item '${CLIENT_VTT_DIR}\\EnableTestHarness.txt' -Force -ErrorAction SilentlyContinue"
+    # Guarded with Test-Path rather than -ErrorAction SilentlyContinue: suppressing the
+    # error still leaves $? false, so `powershell.exe -Command` exits 1 and `set -e` kills
+    # the run when the marker simply wasn't there.
+    run_on_omen_cmd "if (Test-Path '${CLIENT_VTT_DIR}\\EnableTestHarness.txt') { Remove-Item '${CLIENT_VTT_DIR}\\EnableTestHarness.txt' -Force }"
 fi
 
 log "deploying VisitedTraderTeleport Config/ to the client..."
