@@ -24,7 +24,8 @@ internal sealed class ConsoleCmdTestPilot : ConsoleCmdAbstract
 
     public override string getHelp()
     {
-        return "testpilot screenshot <absolute path without extension>";
+        return "testpilot <screenshot <absolute path without extension>|" +
+               "dialog <open <entityId>|dump|select <responseId>|close>>";
     }
 
     public override void Execute(List<string> _params, CommandSenderInfo _senderInfo)
@@ -41,8 +42,12 @@ internal sealed class ConsoleCmdTestPilot : ConsoleCmdAbstract
             case "screenshot":
                 RunScreenshot(_params.Count > 1 ? _params[1] : null);
                 break;
+            case "dialog":
+                DialogDriver.Execute(_params);
+                break;
             default:
-                Output("[testpilot] usage: testpilot screenshot <absolute path without extension>");
+                Output("[testpilot] usage: testpilot <screenshot <absolute path without extension>|" +
+                       "dialog <open <entityId>|dump|select <responseId>|close>>");
                 break;
         }
     }
