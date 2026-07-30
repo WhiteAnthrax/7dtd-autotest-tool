@@ -290,16 +290,59 @@ the Debug sweep's job, and they transfer precisely because the packaged `Config/
 
 ## Publishing a verified package to Nexus Mods
 
+### The ids for this mod
+
+Public, and awkward to re-derive, so they are written down here. Note the mod id is **not**
+the number in the page URL:
+
+| | value |
+|---|---|
+| `--mod-id` | `4548370376889` (the page URL's `10425` is the *game-scoped* id) |
+| `--file-id`, 3.x line | `7599716` - "Travel Between Visited Traders (V3.0)", category `main` |
+| `--file-id`, v2.6 line | `7403906` - "VisitedTraderTeleport 0.2.0", category `optional` |
+
+A third file (`7542863`) exists but is inactive and unused - leave it alone.
+
+To re-derive them, or for a different mod:
+
 ```bash
+. ~/.config/nexus-upload.env
+H=(-H "apikey: $NEXUS_API_KEY" -H "User-Agent: 7dtd-autotest-tool")
+curl -sS "${H[@]}" https://api.nexusmods.com/v3/games/7daystodie/mods/<page url number> | jq .data.id
+curl -sS "${H[@]}" https://api.nexusmods.com/v3/mods/<that id>/files | jq .data.mod_files
+curl -sS "${H[@]}" https://api.nexusmods.com/v3/mod-files/<file id>/versions | jq -r '.data.versions[] | "\(.version) \(.category)"'
+```
+
+### Publishing
+
+```bash
+# 3.x line
 ./bin/publish-to-nexus.sh --profile v3 \
-    --package dist/VisitedTraderTeleport-0.7.10.zip \
-    --version 0.7.10 --file-id <file id> --mod-id <mod id> \
-    --changelog ../VisitedTraderTeleport/docs/NexusModsChangelog-0.7.10.txt \
-    --archive-existing --update-mod-version
+    --package dist/VisitedTraderTeleport-0.7.11.zip --version 0.7.11 \
+    --file-id 7599716 --mod-id 4548370376889 \
+    --display-name "Travel Between Visited Traders 0.7.11 (for V3.1)" \
+    --changelog ../VisitedTraderTeleport/docs/NexusModsChangelog-0.7.11.txt \
+    --update-mod-version
+
+# v2.6 line
+./bin/publish-to-nexus.sh --profile v26 \
+    --package dist/VisitedTraderTeleport-0.6.23.zip --version 0.6.23 \
+    --file-id 7403906 --mod-id 4548370376889 --category optional \
+    --display-name "Travel Between Visited Traders 0.6.23 (for V2.6)" \
+    --changelog ../VisitedTraderTeleport/docs/NexusModsChangelog-0.6.23.txt
 ```
 
 `--dry-run` prints everything it would send and stops; `--yes` skips the confirmation.
 Watch for `NEXUS_PUBLISH_RESULT {...}`.
+
+Three things match how the page is already set up, and the defaults do **not**:
+
+- **`--category optional` on the v2.6 line.** That file is `optional` on Nexus; the default
+  is `main`, which would silently re-categorise it.
+- **`--update-mod-version` only on the 3.x line.** The page's headline version should track
+  the current line; setting it while publishing a v2.6 build makes the mod look outdated.
+- **`--display-name` follows the existing "(for V3.1)" / "(for V2.6)" naming.** Without it
+  the file is named after the ZIP, which loses the game-version marker readers rely on.
 
 **It refuses to upload unless `run-release-verification.sh` passed against this exact ZIP.**
 That is the reason it lives here rather than in the mod repo: publishing before verifying is
