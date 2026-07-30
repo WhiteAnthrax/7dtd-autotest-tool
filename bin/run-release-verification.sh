@@ -34,7 +34,7 @@ ALL_LANGUAGES="english,german,spanish,french,italian,japanese,koreana,polish,bra
 
 usage() {
     cat <<EOF
-Usage: $0 --profile <v3|v26> --package <zip> [--languages a,b,c]
+Usage: $0 --profile <v3|v26> --package <zip> [--languages a,b,c] [--fresh-save] [--keep-save]
 
 Installs a released VisitedTraderTeleport ZIP on the server and client and walks the real
 trader dialog against it, keeping a screenshot per language.
@@ -42,6 +42,10 @@ trader dialog against it, keeping a screenshot per language.
   --profile <name>     Which config/<name>.env to run against.
   --package <zip>      The released package, e.g. dist/VisitedTraderTeleport-0.7.10.zip.
   --languages a,b,c    Comma-separated languages. Default: english.
+  --fresh-save         Run against a throwaway save. Recommended: the walkthrough asserts
+                       the player is alive, and a persistent save carrying a character an
+                       earlier run got killed fails every language.
+  --keep-save          With --fresh-save, keep the throwaway save afterwards.
 
 Results land in output/<profile>/:
   screenshots/<language>/*.jpg        what the shipped build drew
@@ -54,11 +58,15 @@ EOF
 PROFILE=""
 PACKAGE=""
 LANGUAGES_CSV="english"
+FRESH_SAVE=0
+KEEP_SAVE=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --profile) PROFILE="${2:-}"; shift 2 ;;
         --package) PACKAGE="${2:-}"; shift 2 ;;
         --languages) LANGUAGES_CSV="${2:-}"; shift 2 ;;
+        --fresh-save) FRESH_SAVE=1; shift ;;
+        --keep-save) KEEP_SAVE=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown argument: $1" ;;
     esac
@@ -79,8 +87,11 @@ done
 
 PACKAGE="$(cd "$(dirname "$PACKAGE")" && pwd)/$(basename "$PACKAGE")"
 export VTT_RELEASE_PACKAGE="$PACKAGE"
-export TESTPILOT_FRESH_SAVE=0
-export TESTPILOT_KEEP_SAVE=0
+if [ "$KEEP_SAVE" = "1" ] && [ "$FRESH_SAVE" = "0" ]; then
+    die "--keep-save only makes sense together with --fresh-save"
+fi
+export TESTPILOT_FRESH_SAVE="$FRESH_SAVE"
+export TESTPILOT_KEEP_SAVE="$KEEP_SAVE"
 
 load_profile "$PROFILE"
 
