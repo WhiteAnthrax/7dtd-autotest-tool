@@ -288,6 +288,35 @@ What it deliberately does not cover is paging. Seeding a long destination list n
 mod's internals, so the five real traders it records give one page. Paging boundaries stay
 the Debug sweep's job, and they transfer precisely because the packaged `Config/` matches.
 
+## Publishing a verified package to Nexus Mods
+
+```bash
+./bin/publish-to-nexus.sh --profile v3 \
+    --package dist/VisitedTraderTeleport-0.7.10.zip \
+    --version 0.7.10 --file-id <file id> --mod-id <mod id> \
+    --changelog ../VisitedTraderTeleport/docs/NexusModsChangelog-0.7.10.txt \
+    --archive-existing --update-mod-version
+```
+
+`--dry-run` prints everything it would send and stops; `--yes` skips the confirmation.
+Watch for `NEXUS_PUBLISH_RESULT {...}`.
+
+**It refuses to upload unless `run-release-verification.sh` passed against this exact ZIP.**
+That is the reason it lives here rather than in the mod repo: publishing before verifying is
+how a release once went out with only its Debug twin ever having been run. The check matches
+on the package *filename* and `ok: true` together, so rebuilding the ZIP without re-verifying
+does not sneak through.
+
+The file id and mod id come from the Nexus page (the mod id is in its URL). The API key is
+read from `NEXUS_API_KEY` or `~/.config/nexus-upload.env` (mode 600) - see
+`config/nexus-upload.env.example`. Never pass it as an argument.
+
+If the changelog file's first line is just the version number, it is dropped: Nexus already
+shows the version separately.
+
+What this does **not** do, because the Upload API does not expose it: create a new mod page,
+edit the Full description, or change tags. Those stay manual.
+
 ## Troubleshooting
 
 If a run leaves things in a bad state (killed mid-run, `run-roundtrip.sh`'s process was
