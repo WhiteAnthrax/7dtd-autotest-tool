@@ -35,8 +35,12 @@ VERDICT="$(jq '
         destination: .destination_text,
         confirmation: .confirmation,
         recorded_keys: (.recorded_keys | length),
-        expected_recorded_keys: .expected_recorded_keys,
-        keys_recorded_as_expected: ((.recorded_keys | length) == .expected_recorded_keys),
+        minimum_recorded_keys: .minimum_recorded_keys,
+        # A floor, not an equality: the dialog walkthrough in the same run has already
+        # recorded its own traders, and visit history is reset once per run, not per phase.
+        keys_recorded: ((.recorded_keys | length) >= .minimum_recorded_keys),
+        player_visits: .player_visits,
+        visits_persisted: (.player_visits >= 1),
         player_alive: ((.player.before.dead | not) and (.player.after.dead | not)),
         screenshots: (.screenshots | length)
     }
@@ -44,7 +48,8 @@ VERDICT="$(jq '
         .travelled
         and .no_teleport_failure
         and .no_server_exceptions
-        and .keys_recorded_as_expected
+        and .keys_recorded
+        and .visits_persisted
         and .player_alive
       )
 ' "$RESULT_FILE")"

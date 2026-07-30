@@ -215,7 +215,13 @@ SAVE_NAME="$(effective_game_save_name "$OUTPUT_DIR")"
 DATA_FILE="$(find "$SERVER_SAVES_DIR" -path "*/${SAVE_NAME}/VisitedTraderTeleportData.json" 2>/dev/null | head -1)"
 [ -n "$DATA_FILE" ] || die "no VisitedTraderTeleportData.json found under $SERVER_SAVES_DIR for save name '$SAVE_NAME'"
 RECORDED_KEYS="$(jq '[.Traders | keys[]]' "$DATA_FILE")"
+# At least the traders this scenario recorded, and possibly more: within one run of
+# run-release-verification.sh the dialog walkthrough (05r) has already recorded its own
+# five, and visit history is only reset by 03-deploy-mods.sh at the start of the run. So
+# assert a floor, not an exact count.
+PLAYER_VISIT_COUNT="$(jq '[.VisitsByPlayer[]? | length] | add // 0' "$DATA_FILE")"
 log "server-side recorded keys: $(printf '%s' "$RECORDED_KEYS" | jq -c .)"
+log "server-side visits recorded for players: ${PLAYER_VISIT_COUNT}"
 
 SHOTS_JSON="$(printf '%s\n' "${SHOT_NAMES[@]}" | jq -R . | jq -s 'map(. + ".jpg")')"
 
@@ -229,7 +235,8 @@ jq -n \
     --argjson teleport_failed "${TELEPORT_FAILED_COUNT:-0}" \
     --argjson server_exceptions "${MOD_EXCEPTIONS:-0}" \
     --argjson recorded_keys "$RECORDED_KEYS" \
-    --argjson expected_recorded_keys "${#TRADER_PREFABS[@]}" \
+    --argjson minimum_recorded_keys "${#TRADER_PREFABS[@]}" \
+    --argjson player_visits "${PLAYER_VISIT_COUNT:-0}" \
     --argjson player_before "$PLAYER_BEFORE" \
     --argjson player_after "$PLAYER_AFTER" \
     --argjson screenshots "$SHOTS_JSON" \
@@ -241,7 +248,8 @@ jq -n \
         screenshot_dir: $screenshot_dir,
         server: {teleported: $teleported, teleport_failed: $teleport_failed, exceptions: $server_exceptions},
         recorded_keys: $recorded_keys,
-        expected_recorded_keys: $expected_recorded_keys,
+        minimum_recorded_keys: $minimum_recorded_keys,
+        player_visits: $player_visits,
         player: {before: $player_before, after: $player_after},
         screenshots: $screenshots
     }' > "$RESULT_FILE"
