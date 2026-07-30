@@ -31,9 +31,38 @@ for var in SERVER_MODS_DIR CLIENT_MODS_DIR VTT_CLIENT_MOD_DIRNAME OMEN_SCRATCH_D
 done
 
 OUTPUT_DIR="$ROOT_DIR/output/$PROFILE"
-[ -f "$OUTPUT_DIR/VisitedTraderTeleport.debug.dll" ] || die "missing $OUTPUT_DIR/VisitedTraderTeleport.debug.dll (run 02-build-mods.sh first)"
 [ -f "$OUTPUT_DIR/SdtdTestPilot.debug.dll" ] || die "missing $OUTPUT_DIR/SdtdTestPilot.debug.dll (run 02-build-mods.sh first)"
-[ -d "$OUTPUT_DIR/mod-config" ] || die "missing $OUTPUT_DIR/mod-config (run 02-build-mods.sh first)"
+
+# VTT_RELEASE_PACKAGE deploys the mod under test straight out of a released ZIP instead of
+# the Debug build. That is the only way to test what users actually download: the Debug
+# build exists solely because `vtttest` needs it, and the shipped Release build has no
+# harness at all. Driving it needs `testpilot dialog` instead - see docs/overview.md.
+#
+# SdtdTestPilot itself stays a Debug build either way; it is the test driver, not the mod
+# under test.
+VTT_RELEASE_PACKAGE="${VTT_RELEASE_PACKAGE:-}"
+if [ -n "$VTT_RELEASE_PACKAGE" ]; then
+    [ -f "$VTT_RELEASE_PACKAGE" ] || die "VTT_RELEASE_PACKAGE not found: $VTT_RELEASE_PACKAGE"
+    require_cmd unzip
+    RELEASE_DIR="$OUTPUT_DIR/release-mod"
+    rm -rf "$RELEASE_DIR"
+    mkdir -p "$RELEASE_DIR"
+    unzip -q "$VTT_RELEASE_PACKAGE" -d "$RELEASE_DIR" || die "failed to extract $VTT_RELEASE_PACKAGE"
+    VTT_SRC_DIR="$RELEASE_DIR/VisitedTraderTeleport"
+    [ -f "$VTT_SRC_DIR/VisitedTraderTeleport.dll" ] \
+        || die "$VTT_RELEASE_PACKAGE does not contain VisitedTraderTeleport/VisitedTraderTeleport.dll"
+    VTT_DLL_SRC="$VTT_SRC_DIR/VisitedTraderTeleport.dll"
+    VTT_CONFIG_SRC="$VTT_SRC_DIR/Config"
+    VTT_DEPLOY_LABEL="released package $(basename "$VTT_RELEASE_PACKAGE")"
+    DEPLOY_TEST_HARNESS=0
+else
+    [ -f "$OUTPUT_DIR/VisitedTraderTeleport.debug.dll" ] || die "missing $OUTPUT_DIR/VisitedTraderTeleport.debug.dll (run 02-build-mods.sh first)"
+    [ -d "$OUTPUT_DIR/mod-config" ] || die "missing $OUTPUT_DIR/mod-config (run 02-build-mods.sh first)"
+    VTT_DLL_SRC="$OUTPUT_DIR/VisitedTraderTeleport.debug.dll"
+    VTT_CONFIG_SRC="$OUTPUT_DIR/mod-config"
+    VTT_DEPLOY_LABEL="Debug build"
+    DEPLOY_TEST_HARNESS=1
+fi
 
 # --- Server side (direct filesystem access, this machine) ---
 SERVER_VTT_DIR="$SERVER_MODS_DIR/VisitedTraderTeleport"
@@ -44,9 +73,15 @@ log "backing up server-side VisitedTraderTeleport to $SERVER_BACKUP_DIR..."
 rm -rf "$SERVER_BACKUP_DIR"
 cp -a "$SERVER_VTT_DIR" "$SERVER_BACKUP_DIR"
 
-log "deploying Debug VisitedTraderTeleport to the server..."
-cp "$OUTPUT_DIR/VisitedTraderTeleport.debug.dll" "$SERVER_VTT_DIR/VisitedTraderTeleport.dll"
-: > "$SERVER_VTT_DIR/EnableTestHarness.txt"
+log "deploying VisitedTraderTeleport (${VTT_DEPLOY_LABEL}) to the server..."
+cp "$VTT_DLL_SRC" "$SERVER_VTT_DIR/VisitedTraderTeleport.dll"
+if [ "$DEPLOY_TEST_HARNESS" = "1" ]; then
+    : > "$SERVER_VTT_DIR/EnableTestHarness.txt"
+else
+    # A Release build ignores the marker, but leaving a stale one behind would misrepresent
+    # what was installed to anyone reading the directory afterwards.
+    rm -f "$SERVER_VTT_DIR/EnableTestHarness.txt"
+fi
 
 # Deploy the built Config/ too, not just the DLL - otherwise a Localization.csv or
 # dialogs.xml change is never actually loaded and the run silently verifies the previously
@@ -54,7 +89,7 @@ cp "$OUTPUT_DIR/VisitedTraderTeleport.debug.dll" "$SERVER_VTT_DIR/VisitedTraderT
 # teardown's restore already covers this.
 log "deploying VisitedTraderTeleport Config/ to the server..."
 mkdir -p "$SERVER_VTT_DIR/Config"
-cp -rf "$OUTPUT_DIR/mod-config/." "$SERVER_VTT_DIR/Config/"
+cp -rf "$VTT_CONFIG_SRC/." "$SERVER_VTT_DIR/Config/"
 
 # Reset visit history so vtttest record's canonicalized-key resolution is deterministic.
 # VisitedTraderTeleport merges a new visit into an existing destination when it falls
@@ -105,13 +140,20 @@ run_on_omen_cmd "New-Item -ItemType Directory -Force -Path '${CLIENT_BACKUP_DIR}
 # client backup is file-by-file, so Config/ needs its own copy before it is overwritten.
 run_on_omen_cmd "Remove-Item '${CLIENT_BACKUP_DIR}\\Config.orig' -Recurse -Force -ErrorAction SilentlyContinue; if (Test-Path '${CLIENT_VTT_DIR}\\Config') { Copy-Item '${CLIENT_VTT_DIR}\\Config' '${CLIENT_BACKUP_DIR}\\Config.orig' -Recurse -Force }"
 
-log "deploying Debug VisitedTraderTeleport to the client..."
-copy_to_omen "$OUTPUT_DIR/VisitedTraderTeleport.debug.dll" "${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll"
-run_on_omen_cmd "New-Item -ItemType File -Force -Path '${CLIENT_VTT_DIR}\\EnableTestHarness.txt' | Out-Null"
+log "deploying VisitedTraderTeleport (${VTT_DEPLOY_LABEL}) to the client..."
+copy_to_omen "$VTT_DLL_SRC" "${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll"
+if [ "$DEPLOY_TEST_HARNESS" = "1" ]; then
+    run_on_omen_cmd "New-Item -ItemType File -Force -Path '${CLIENT_VTT_DIR}\\EnableTestHarness.txt' | Out-Null"
+else
+    # Guarded with Test-Path rather than -ErrorAction SilentlyContinue: suppressing the
+    # error still leaves $? false, so `powershell.exe -Command` exits 1 and `set -e` kills
+    # the run when the marker simply wasn't there.
+    run_on_omen_cmd "if (Test-Path '${CLIENT_VTT_DIR}\\EnableTestHarness.txt') { Remove-Item '${CLIENT_VTT_DIR}\\EnableTestHarness.txt' -Force }"
+fi
 
 log "deploying VisitedTraderTeleport Config/ to the client..."
 run_on_omen_cmd "New-Item -ItemType Directory -Force -Path '${CLIENT_VTT_DIR}\\Config' | Out-Null"
-copy_dir_to_omen "$OUTPUT_DIR/mod-config" "${CLIENT_VTT_DIR}\\Config"
+copy_dir_to_omen "$VTT_CONFIG_SRC" "${CLIENT_VTT_DIR}\\Config"
 
 log "deploying SdtdTestPilot to the client..."
 CLIENT_TESTPILOT_DIR="${CLIENT_MODS_DIR}\\SdtdTestPilot"

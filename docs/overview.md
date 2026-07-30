@@ -42,6 +42,23 @@ Two things follow:
   dialog` needs `VisitedTraderTeleport`'s internals, so it ships there (Debug-only);
   screenshots are useful to any mod, so `testpilot screenshot` lives in `SdtdTestPilot`.
 
+## Why the dialog can also be driven from SdtdTestPilot
+
+A harness compiled into the mod under test can only ever drive a Debug build of it, because
+that is the only build the harness exists in. The Release build users download therefore had
+nothing capable of driving it - which is how a release once got published with only its
+Debug twin ever having been run.
+
+`testpilot dialog open|select|dump|close` closes that. It opens the game's own dialog window
+group and activates responses through public game APIs only, so it knows nothing about any
+particular mod and works against any build of one. That is what makes
+`run-release-verification.sh` possible: install the shipped ZIP, drive its dialog, keep the
+screenshots.
+
+It does not replace `vtttest dialog`. Seeding a long destination list, or reading the mod's
+own client-side state, needs the mod's internals and stays there - so the Debug sweep still
+owns paging, and the release run owns "the thing we are actually shipping renders".
+
 ## Why the language sweep is a separate driver
 
 The game reads `-language=` once, while parsing its command line, so there is no way to
