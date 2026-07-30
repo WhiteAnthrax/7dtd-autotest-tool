@@ -73,6 +73,19 @@ tp_dump() {
     printf '%s' "$dump"
 }
 
+# Like tp_cmd/tp_dump but never fatal: after the travel response is activated the mod closes
+# the dialog, so "no dialog is open" is the expected answer rather than a failure.
+tp_try() {
+    submit_and_check "testpilot dialog $*" >/dev/null 2>&1 || true
+}
+
+tp_dump_optional() {
+    local result dump
+    result="$(submit_and_check "testpilot dialog dump" 2>/dev/null || true)"
+    dump="$(printf '%s' "$result" | jq -r '.output? // ""' 2>/dev/null | grep -oP '^TESTPILOT_DIALOG_DUMP \K.*' | tail -1 || true)"
+    printf '%s' "$dump"
+}
+
 take_screenshot() {
     local name="$1" result ok
     result="$(submit_and_check "testpilot screenshot ${REMOTE_SHOT_DIR}\\${name}")"
@@ -164,7 +177,7 @@ tp_cmd select "$DESTINATION_ID" >/dev/null
 # default is whenCost, and travel cost ships disabled, so normally no confirmation appears).
 # Handle both so this does not depend on the installed config.
 CONFIRMED="not required"
-DUMP_AFTER_SELECT="$(tp_dump || true)"
+DUMP_AFTER_SELECT="$(tp_dump_optional)"
 if printf '%s' "$DUMP_AFTER_SELECT" | jq -e --arg id "$CONFIRM_YES_ID" '[.entries[].id] | any(. == $id)' >/dev/null 2>&1; then
     take_screenshot "02-confirm"
     log "confirmation screen shown; confirming"
@@ -188,7 +201,7 @@ TELEPORT_FAILED_COUNT="$(printf '%s\n' "$NEW_LOG" | grep -c '\[VisitedTraderTele
 MOD_EXCEPTIONS="$(printf '%s\n' "$NEW_LOG" | grep -c 'Exception' || true)"
 log "server log since travel: Teleported=${TELEPORTED_COUNT} failed=${TELEPORT_FAILED_COUNT} exceptions=${MOD_EXCEPTIONS}"
 
-tp_cmd close >/dev/null || true
+tp_try close
 
 log "collecting screenshots to $LOCAL_SHOT_DIR..."
 for name in "${SHOT_NAMES[@]}"; do
