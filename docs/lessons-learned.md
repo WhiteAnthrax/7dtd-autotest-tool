@@ -552,3 +552,50 @@ So: **diff the tag against the previous tag before calling a release safe**, and
 verification to what actually changed rather than to what you were working on. Screenshots
 of translated text say nothing about a refactor of the code behind them; that is what
 `05t-run-release-travel-scenario.sh` exists for.
+
+## A blocklist of "things that are not X" will keep missing things that are not X
+
+`VisitedTraderTeleport` decided whether to drag an entity along on a teleport by asking
+"does the player own it, and is it not one of the types we know are not companions?" That
+missed drivable vehicles, got a type added for them, and then missed placed turrets - which
+were being uprooted from bases and dropped at traders on every single teleport.
+
+The type list was never the problem. `belongsPlayerId` means "this player owns it", which is
+equally true of a turret, a vehicle and a drone; it says nothing about following anyone.
+Reading ownership as companionship guaranteed a stream of exceptions, one per owned entity
+type the game ever adds.
+
+The fix was to ask the positive question instead - and it turned out the codebase already
+had the answer half-written. Decompiling SCore showed its own `IsHired` is
+`GetLeaderOrOwner(id) != null`, reading two Buffs custom vars that this code was already
+checking as a *fallback* under the ownership test. Deleting the broader condition was the
+whole fix.
+
+Two things worth carrying:
+
+- **When a blocklist misses something twice, stop extending it.** The second miss is the
+  signal that the predicate is asking the wrong question, not that the list is short.
+- **Look for the authority's own predicate before inventing one.** The issue proposed using
+  `EntityUtilities.GetCurrentOrder` for positive identification; reading it showed it
+  returns `Orders.Wander` by default for *any* `EntityAlive`, so every entity "has" an
+  order and the test would never have excluded anything. The neighbouring `IsHired` was the
+  right one, and it was three lines long.
+
+## Some verification is not reachable from a script, and saying so beats implying otherwise
+
+The turret fix could not be reproduced end to end. A console-spawned turret comes out with
+`belongsPlayerId = -1` - ownership is assigned when a *player* places one - so the very
+condition that triggered the bug cannot be set up headlessly. Nor can a real SCore-hired
+companion: hiring is dialog-driven and SCore's only cvar console command targets the primary
+player.
+
+What was reachable: the decision table as unit tests, a live `EntityTurret` classified by
+the shipped predicate on real hardware, and a green roundtrip (which runs the companion
+gather after every teleport). What was not: an *owned* turret, and the "real companions are
+still gathered" direction, which rests on the diff instead - the Leader/Owner branch is
+untouched and only a broader condition was removed.
+
+`vtttest companions` came out of this: it prints every live entity's type, `belongsPlayerId`,
+Leader/Owner vars, the verdict, and what the old ownership rule would have said. Both
+previous misses were invisible from outside - they surfaced as "my turret moved". The next
+disagreement is now a five-second question instead of a bug report.
