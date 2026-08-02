@@ -64,6 +64,14 @@ else
     DEPLOY_TEST_HARNESS=1
 fi
 
+# In hostload mode the client hosts the world and the Docker server is not involved at all,
+# so there is nothing to deploy to it - and restarting it would only bind the port the
+# hosting client wants.
+TESTPILOT_MODE="${TESTPILOT_MODE:-connect}"
+if [ "$TESTPILOT_MODE" = "hostload" ]; then
+    log "hostload: skipping the server-side deploy and restart"
+else
+
 # --- Server side (direct filesystem access, this machine) ---
 SERVER_VTT_DIR="$SERVER_MODS_DIR/VisitedTraderTeleport"
 [ -d "$SERVER_VTT_DIR" ] || die "server mod dir not found: $SERVER_VTT_DIR"
@@ -128,6 +136,8 @@ docker_server_wait_mod_loaded 60
 # itself (createWorld -> StartGame done) takes much longer and a client that connects
 # before that finishes gets rejected ("still initializing the server").
 docker_server_wait_started 300
+
+fi
 
 # --- Client side (SSH, omen-build) ---
 CLIENT_VTT_DIR="${CLIENT_MODS_DIR}\\${VTT_CLIENT_MOD_DIRNAME}"

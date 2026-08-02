@@ -44,7 +44,33 @@ log "resetting command queue..."
 testpilot_reset_queue
 
 EXE_PATH="${CLIENT_GAME_PATH}\\${CLIENT_EXE_NAME}"
-ARGS="-SkipNewsScreen=true -testpilot.mode=connect -testpilot.ip=${SERVER_IP} -testpilot.port=${SERVER_PORT} -testpilot.queue=${OMEN_QUEUE_DIR} -testpilot.readytimeout=${READY_TIMEOUT_SECONDS}"
+# TESTPILOT_MODE picks the topology.
+#
+#   connect  - join the Docker dedicated server. The world lives in the server process.
+#   hostload - the client hosts the world itself, with no server involved. Worth running
+#              because travel takes a different branch for a local player than for a remote
+#              one, and each branch has its own GatherCompanions call site - so a
+#              dedicated-server run leaves the single-player path untested.
+#
+# In hostload mode nothing should start the Docker server: it would bind the same port the
+# hosting client wants.
+TESTPILOT_MODE="${TESTPILOT_MODE:-connect}"
+case "$TESTPILOT_MODE" in
+    connect)
+        ARGS="-SkipNewsScreen=true -testpilot.mode=connect -testpilot.ip=${SERVER_IP} -testpilot.port=${SERVER_PORT} -testpilot.queue=${OMEN_QUEUE_DIR} -testpilot.readytimeout=${READY_TIMEOUT_SECONDS}"
+        ;;
+    hostload)
+        # Navezgane ships with the game, so hosting it needs no world generation. The save
+        # name is this tool's own, never a world someone plays on.
+        HOSTLOAD_WORLD="${HOSTLOAD_WORLD:-Navezgane}"
+        HOSTLOAD_GAME_NAME="${HOSTLOAD_GAME_NAME:-VttAutotestHost}"
+        ARGS="-SkipNewsScreen=true -testpilot.mode=hostload -testpilot.world=${HOSTLOAD_WORLD} -testpilot.gamename=${HOSTLOAD_GAME_NAME} -testpilot.queue=${OMEN_QUEUE_DIR} -testpilot.readytimeout=${READY_TIMEOUT_SECONDS}"
+        log "hosting ${HOSTLOAD_WORLD} locally as save '${HOSTLOAD_GAME_NAME}' (no dedicated server)"
+        ;;
+    *)
+        die "unknown TESTPILOT_MODE '$TESTPILOT_MODE' (expected connect or hostload)"
+        ;;
+esac
 
 # CLIENT_LANGUAGE picks the game's UI language for this launch. It is the game's own
 # `-language=<name>` launch argument (Localization.RequestedLanguage reads it through
@@ -75,15 +101,24 @@ run_on_omen_script "$ROOT_DIR/lib/windows/Start-TestPilotClient.ps1" \
 # hang. Catching it now turns a silent READY_TIMEOUT_SECONDS-long wait into an immediate,
 # actionable error. Only a confirmed mismatch is fatal: if either version can't be read,
 # say so and carry on rather than blocking a run that might be perfectly fine.
-SERVER_COMPAT="$(docker_server_compat_version)"
-CLIENT_COMPAT="$(run_on_omen_script "$ROOT_DIR/lib/windows/Get-ClientVersion.ps1" -TimeoutSeconds 60 \
-    | tr -d '\r' | sed -n 's/^COMPATIBILITY //p' | head -1)"
-if [ -z "$SERVER_COMPAT" ] || [ -z "$CLIENT_COMPAT" ]; then
-    log "warn: could not determine both versions (server='${SERVER_COMPAT:-?}' client='${CLIENT_COMPAT:-?}'), skipping the compatibility check"
-elif [ "$SERVER_COMPAT" != "$CLIENT_COMPAT" ]; then
-    die "game version mismatch: server is V${SERVER_COMPAT}, client is V${CLIENT_COMPAT}. The client cannot join and would just hang at the version dialog. Update the client install at ${CLIENT_GAME_PATH} to V${SERVER_COMPAT} (or pin the server - see docs/runbook.md)."
+# Only the version check is server-specific. The READY wait below is not - a hosting client
+# still has to finish loading its world before the queue answers - so this skips the check
+# and nothing else. (Returning early here instead was tried, and it skipped the READY wait
+# too: the scenario then ran against a client that had not loaded a world yet and reported
+# that it could not find the player.)
+if [ "$TESTPILOT_MODE" = "hostload" ]; then
+    log "hostload: no server to compare versions against, skipping the compatibility check"
 else
-    log "version check ok: server and client are both V${SERVER_COMPAT}"
+    SERVER_COMPAT="$(docker_server_compat_version)"
+    CLIENT_COMPAT="$(run_on_omen_script "$ROOT_DIR/lib/windows/Get-ClientVersion.ps1" -TimeoutSeconds 60 \
+        | tr -d '\r' | sed -n 's/^COMPATIBILITY //p' | head -1)"
+    if [ -z "$SERVER_COMPAT" ] || [ -z "$CLIENT_COMPAT" ]; then
+        log "warn: could not determine both versions (server='${SERVER_COMPAT:-?}' client='${CLIENT_COMPAT:-?}'), skipping the compatibility check"
+    elif [ "$SERVER_COMPAT" != "$CLIENT_COMPAT" ]; then
+        die "game version mismatch: server is V${SERVER_COMPAT}, client is V${CLIENT_COMPAT}. The client cannot join and would just hang at the version dialog. Update the client install at ${CLIENT_GAME_PATH} to V${SERVER_COMPAT} (or pin the server - see docs/runbook.md)."
+    else
+        log "version check ok: server and client are both V${SERVER_COMPAT}"
+    fi
 fi
 
 testpilot_wait_ready "$READY_TIMEOUT_SECONDS"
