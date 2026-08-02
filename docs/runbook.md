@@ -288,6 +288,53 @@ What it deliberately does not cover is paging. Seeding a long destination list n
 mod's internals, so the five real traders it records give one page. Paging boundaries stay
 the Debug sweep's job, and they transfer precisely because the packaged `Config/` matches.
 
+## Checking who travel takes along
+
+```bash
+./bin/run-companion-check.sh --profile v3
+```
+
+Watch for `COMPANION_CHECK_RESULT {... "status":"ok" ...}`.
+
+It spawns a stand-in companion and a turret, marks them the way SCore and a placed turret
+mark theirs, travels, and checks that the companion was gathered and the turret was not.
+Those are the two halves of the same rule and they pull in opposite directions - a companion
+left behind is a regression, a turret dragged out of a base is issue #21 - so both are
+asserted in one run.
+
+`--fresh-save` is the default here, unlike the other drivers: the scenario needs a living
+player and asserts it at both ends.
+
+**Everything about the entities happens on the server**, through `lib/server-console.sh`,
+and that is not incidental. `GatherCompanions` runs server-side, so an entity spawned or
+marked through the client command queue is invisible to the code under test - see
+`docs/lessons-learned.md`, which has the three separate wrong answers that came from getting
+this wrong. The probe is taken on both sides and both are recorded, so a marker written to
+the wrong process shows up as a disagreement rather than as a product bug.
+
+If the scenario fails it captures what the client was showing at the time into
+`output/<profile>/screenshots/companion/failure.jpg`. Most failures here are about what the
+game was doing - a dead player, a spawn that landed badly - rather than about the numbers.
+
+## Running a console command on the server
+
+`lib/server-console.sh` exists because `lib/testpilot-queue.sh` talks to the *client*. Both
+take a console command and return text, which is exactly why they are separate names rather
+than one helper with a flag.
+
+```bash
+source lib/server-console.sh
+server_console_checked "le" "Total of"
+```
+
+The second argument is a substring to wait for; without it the call waits out the full
+timeout, because the console answers asynchronously and there is nothing to block on. A
+fixed sleep was tried first and cut off replies at two seconds.
+
+The route is `docker exec` into the container and then telnet to loopback: with
+`TelnetPassword` empty - the shipped default - the server binds telnet to loopback only, so
+the published port accepts connections from this host and reaches nothing.
+
 ## Publishing a verified package to Nexus Mods
 
 ### The ids for this mod
