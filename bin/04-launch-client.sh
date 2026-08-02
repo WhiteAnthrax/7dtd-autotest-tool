@@ -65,6 +65,20 @@ case "$TESTPILOT_MODE" in
         HOSTLOAD_WORLD="${HOSTLOAD_WORLD:-Navezgane}"
         HOSTLOAD_GAME_NAME="${HOSTLOAD_GAME_NAME:-VttAutotestHost}"
         ARGS="-SkipNewsScreen=true -testpilot.mode=hostload -testpilot.world=${HOSTLOAD_WORLD} -testpilot.gamename=${HOSTLOAD_GAME_NAME} -testpilot.queue=${OMEN_QUEUE_DIR} -testpilot.readytimeout=${READY_TIMEOUT_SECONDS}"
+
+        # Start from a save with no history. In connect mode 03-deploy-mods.sh resets the
+        # server's visit history for exactly this reason; hostload skips that stage, so
+        # without this the hosted save accumulates destinations across runs - and a scenario
+        # that picks one then travels to a trader recorded by a *previous* run, hundreds of
+        # metres away, which aborts as "destination was not ready".
+        #
+        # Only ever this tool's own save name, never a world anyone plays on. It is also what
+        # keeps a player killed by an earlier run from poisoning the next one, the way
+        # --fresh-save does for the dedicated server.
+        HOSTLOAD_SAVE_DIR="\$env:APPDATA\\7DaysToDie\\Saves\\${HOSTLOAD_WORLD}\\${HOSTLOAD_GAME_NAME}"
+        log "clearing the hosted save '${HOSTLOAD_GAME_NAME}' so the run starts from nothing"
+        run_on_omen_cmd "if (Test-Path \"${HOSTLOAD_SAVE_DIR}\") { Remove-Item \"${HOSTLOAD_SAVE_DIR}\" -Recurse -Force }"
+
         log "hosting ${HOSTLOAD_WORLD} locally as save '${HOSTLOAD_GAME_NAME}' (no dedicated server)"
         ;;
     *)

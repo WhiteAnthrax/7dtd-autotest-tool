@@ -660,3 +660,29 @@ the same family of mistake - each quiet, each plausible:
 Both are the same shape as the earlier client/server mix-ups: a thing that exists in two
 places, and code that names one of them. The fix each time was an abstraction that asks
 "which side is this?" once - `lib/world-console.sh` - rather than remembering at every call.
+
+## Four ways the same scenario broke on a second topology
+
+Making the companion check run in hostload as well as against a dedicated server took four
+more rounds, and none of them announced itself as an error. They are listed because the
+shape repeats: something exists in two places, and the code names one of them.
+
+- **The READY wait was skipped.** Returning early to skip a server-only version check took
+  the wait with it, so the scenario ran against a client still on its loading screen. The
+  failure screenshot showed a loading tip - which is exactly why the scenario captures one.
+- **The wrong log was read.** A hosting client writes Unity's `Player.log` under
+  `AppData\LocalLow\The Fun Pimps\7 Days To Die`, not `output_log__*.txt`. The run counted
+  zero gathers while the companion had visibly moved to the 1.8m the spot finder uses.
+- **The player's entity id was 0.** In a freshly hosted world the local player really is
+  entity 0 (confirmed in `le`), and `se 0 <class> 1` does nothing at all - silently. Spawning
+  at explicit coordinates instead needs no id and behaves the same in both topologies.
+- **The hosted save persisted between runs.** `03-deploy-mods.sh` resets the *server's* visit
+  history, and hostload skips that stage, so destinations accumulated. The scenario then
+  travelled to a trader recorded by an earlier run, hundreds of metres away, and the trip
+  aborted as "destination was not ready". The hosted save is now cleared before each run,
+  which also stops a player killed by one run from poisoning the next.
+
+Worth keeping: the assumption that a green run in one topology says much about the other is
+not a small one. Every single step of this scenario needed adjusting, and each adjustment was
+found by reading what the game actually reported rather than by reasoning about what should
+happen.
