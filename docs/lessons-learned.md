@@ -599,3 +599,42 @@ untouched and only a broader condition was removed.
 Leader/Owner vars, the verdict, and what the old ownership rule would have said. Both
 previous misses were invisible from outside - they surfaced as "my turret moved". The next
 disagreement is now a five-second question instead of a bug report.
+
+## Client-side and server-side are different worlds, and the console does not say which one you are in
+
+Building a scenario that had to set up server-side state took three wrong turns, each of
+which produced a confident, plausible, wrong answer:
+
+1. **Marked an entity through the client command queue.** `GatherCompanions` runs on the
+   server, so the marker landed on a copy the server never saw. The scenario then reported
+   that companions were not being gathered - a product bug, apparently, complete with a
+   probe agreeing with itself because the probe was reading the same client-side copy.
+2. **Spawned entities through the client command queue.** Worse: a client-spawned entity
+   only exists on the client. Its id means a different entity on the server, or none
+   (`no living entity with that id`). Entities spawned from the *server* console replicate
+   to the client with the same id, so the server is the only side worth spawning from.
+3. **Built without committing.** `02-build-mods.sh` runs `git archive <branch>`, so
+   uncommitted work is silently not built. The symptom was the server answering with an
+   older version of a command's usage string - which reads like a deployment problem rather
+   than a "you never committed it" problem.
+
+The reason all three were slow to spot is that `lib/testpilot-queue.sh` and a server console
+look identical from a script: both take a console command and return text. Nothing in the
+call says which process will run it. That is why `lib/server-console.sh` exists as a separate
+thing with its own name rather than a flag on the existing helper.
+
+The generalisation: **in a client/server game, "where does this run?" is part of every test
+step, not a detail.** When a check disagrees with something already established, ask which
+process answered before concluding anything about the product.
+
+## A stand-in that moves on its own cannot measure whether something moved it
+
+The companion scenario first used a rabbit as the stand-in hired companion. It was gathered
+exactly as designed - to within 1.8m of the player, per `CompanionSpotFinder` - and had
+hopped 20m away again by the time the positions were read twenty seconds later. The check
+read that as "the companion was not gathered".
+
+The stand-in is a trader now: an `EntityAlive` that satisfies the same predicate and stays
+where it is put, so any movement is attributable. Where a passive stand-in is not available,
+prefer evidence the system emits itself - here `GatherCompanions` logs
+`Gathered N companion(s)`, which a wandering animal cannot produce.
