@@ -162,10 +162,45 @@ player_state() {
           health: $health}'
 }
 
+# spawn_and_find <prefab> <spawn command>: issues the spawn and waits until the entity is
+# actually in the world, printing its id.
+#
+# A single spawn followed by a fixed sleep is not enough. The READY marker only means the
+# primary player exists; a heavy modpack can still be on its loading screen, and a spawn
+# issued then quietly does nothing. That failure was diagnosed in one look at the screenshot
+# the scenario captures - the game was showing a loading tip - and retrying is the honest fix,
+# since there is no readiness signal beyond "the thing I asked for is there".
+spawn_and_find() {
+    local prefab="$1" command="$2" attempt id
+    for attempt in 1 2 3 4 5 6; do
+        world_console "$command" "Spawned" 20 >/dev/null
+        sleep 3
+        id="$(printf '%s' "$(world_le)" | grep -oP "name=${prefab}, id=\\K[0-9]+" | head -1 || true)"
+        if [ -n "$id" ]; then
+            [ "$attempt" -gt 1 ] && log "  ${prefab} appeared on attempt ${attempt}"
+            printf '%s' "$id"
+            return 0
+        fi
+        log "  ${prefab} not in the world yet (attempt ${attempt}); the world may still be loading"
+    done
+    return 1
+}
+
 log "step: le (locating the player, TESTPILOT_MODE=${TESTPILOT_MODE:-connect})"
 LE="$(world_le)"
 PLAYER_ID="$(world_player_id "$LE")"
 [ -n "$PLAYER_ID" ] || die "could not find the player's entity id in the 'le' output"
+
+# Spawns go to explicit coordinates rather than "near entity <id>". In a freshly hosted world
+# the local player really is entity id 0 - confirmed in `le` - and `se 0 <class> 1` does
+# nothing, silently. The player's own position is known-good ground, so spawning there needs
+# no id at all and behaves the same in both topologies.
+PLAYER_POS="$(entity_position "$LE" "$PLAYER_ID")"
+[ -n "$PLAYER_POS" ] || die "could not read the player's position from 'le'"
+PX="$(printf '%s' "$PLAYER_POS" | cut -d, -f1 | tr -d ' ')"
+PY_="$(printf '%s' "$PLAYER_POS" | cut -d, -f2 | tr -d ' ')"
+PZ="$(printf '%s' "$PLAYER_POS" | cut -d, -f3 | tr -d ' ')"
+SPAWN_AT="${PX} ${PY_} ${PZ}"
 
 PLAYER_BEFORE_STATE="$(player_state)"
 log "player at start: $(printf '%s' "$PLAYER_BEFORE_STATE" | jq -c .)"
@@ -173,17 +208,12 @@ if [ "$(printf '%s' "$PLAYER_BEFORE_STATE" | jq -r '.dead')" = "true" ]; then
     die "the player is already dead in this save - run with --fresh-save"
 fi
 
-log "spawning the stand-in companion (${COMPANION_PREFAB}) next to the player on the server"
-world_console "se ${PLAYER_ID} ${COMPANION_PREFAB} 1" "Spawned" 20 >/dev/null
-log "spawning a turret (${TURRET_PREFAB}) next to the player on the server"
-world_console "se ${PLAYER_ID} ${TURRET_PREFAB} 1" "Spawned" 20 >/dev/null
-sleep 3
-
-LE="$(world_le)"
-COMPANION_ID="$(printf '%s' "$LE" | grep -oP "name=${COMPANION_PREFAB}, id=\K[0-9]+" | head -1 || true)"
-TURRET_ID="$(printf '%s' "$LE" | grep -oP "name=${TURRET_PREFAB}, id=\K[0-9]+" | head -1 || true)"
-[ -n "$COMPANION_ID" ] || die "could not find or spawn ${COMPANION_PREFAB}"
-[ -n "$TURRET_ID" ] || die "could not find or spawn ${TURRET_PREFAB}"
+log "spawning the stand-in companion (${COMPANION_PREFAB}) next to the player"
+COMPANION_ID="$(spawn_and_find "$COMPANION_PREFAB" "spawnentityat ${COMPANION_PREFAB} ${SPAWN_AT}")" \
+    || die "could not find or spawn ${COMPANION_PREFAB} after several attempts - the world may not have finished loading"
+log "spawning a turret (${TURRET_PREFAB}) next to the player"
+TURRET_ID="$(spawn_and_find "$TURRET_PREFAB" "spawnentityat ${TURRET_PREFAB} ${SPAWN_AT}")" \
+    || die "could not find or spawn ${TURRET_PREFAB} after several attempts"
 log "companion id=${COMPANION_ID} turret id=${TURRET_ID}"
 
 log "marking ${COMPANION_ID} as hired and ${TURRET_ID} as player-owned, where the world lives"
@@ -202,16 +232,11 @@ log "client probe: $(printf '%s' "$PROBE_CLIENT" | jq -c '[.[] | {id: .entity_id
 # see docs/lessons-learned.md on why travelling somewhere far is how a test run kills a player.
 # Spawned on the server for the same reason as everything else; the ids then mean the same
 # thing to the client, which is what runs `vtttest record` and the travel.
-log "spawning two traders on the server and recording them from the client"
-world_console "se ${PLAYER_ID} npcTraderBob 1" "Spawned" 20 >/dev/null
-world_console "se ${PLAYER_ID} npcTraderJen 1" "Spawned" 20 >/dev/null
-sleep 3
-LE="$(world_le)"
-BOB_ID="$(printf '%s' "$LE" | grep -oP 'name=npcTraderBob, id=\K[0-9]+' | head -1 || true)"
-JEN_ID="$(printf '%s' "$LE" | grep -oP 'name=npcTraderJen, id=\K[0-9]+' | head -1 || true)"
-if [ -z "$BOB_ID" ] || [ -z "$JEN_ID" ]; then
-    die "could not find or spawn both traders"
-fi
+log "spawning two traders and recording them from the client"
+BOB_ID="$(spawn_and_find npcTraderBob "spawnentityat npcTraderBob ${SPAWN_AT}")" \
+    || die "could not find or spawn npcTraderBob"
+JEN_ID="$(spawn_and_find npcTraderJen "spawnentityat npcTraderJen ${SPAWN_AT}")" \
+    || die "could not find or spawn npcTraderJen"
 vtt_cmd record "$BOB_ID" >/dev/null
 vtt_cmd record "$JEN_ID" >/dev/null
 
