@@ -27,9 +27,15 @@
 #     that id"). Spawning from the server console replicates to the client with the same id,
 #     so the server is the only side worth spawning from.
 #
-# Hence lib/server-console.sh and the explicit player id. The probe is still taken on both
-# sides and both are recorded, so a marker that ends up in the wrong process announces itself
-# instead of looking like a product bug.
+# Which side that is depends on the topology, so everything goes through lib/world-console.sh
+# rather than naming a helper directly. With a dedicated server it is the server; when the
+# client hosts the world (TESTPILOT_MODE=hostload) there is no second process and it is the
+# client. Both are worth running: travel takes a different branch for a local player than for
+# a remote one, and each branch has its own GatherCompanions call site.
+#
+# The probe is still taken on both sides and both are recorded, so a marker that ends up in
+# the wrong process announces itself instead of looking like a product bug. In hostload the
+# two sides are the same process and simply agree.
 #
 # Writes output/<profile>/companion-result.json (asserted by 06c-verify-companions.sh) and,
 # when something goes wrong, a screenshot of whatever the client was showing at the time.
@@ -47,6 +53,10 @@ source "$ROOT_DIR/lib/ssh-omen.sh"
 source "$ROOT_DIR/lib/testpilot-queue.sh"
 # shellcheck source=lib/server-console.sh
 source "$ROOT_DIR/lib/server-console.sh"
+# shellcheck source=lib/docker-server.sh
+source "$ROOT_DIR/lib/docker-server.sh"
+# shellcheck source=lib/world-console.sh
+source "$ROOT_DIR/lib/world-console.sh"
 
 # Surface `set -e` failures instead of exiting silently (see lib/common.sh).
 trace_errors
@@ -124,26 +134,22 @@ entity_position() {
 
 # Both sides answer the same question about the same entities. They should agree; when they do
 # not, the marker went to the wrong process.
-server_le() {
-    server_console_checked "le" "Total of" 20 | grep -v "Executing command"
-}
-
 probe_client() {
     submit_and_check "vtttest companions" | jq -r '.output' \
         | grep -oP '^VTT_COMPANION_PROBE \K.*' | jq -s .
 }
 
-probe_server() {
+probe_world() {
     # The result marker comes after every probe line, so waiting for it means the whole
     # listing has arrived rather than however much of it fitted in a fixed window.
-    server_console_checked "vtttest companions $1" 'VTT_TEST_RESULT {"action":"companions"' \
+    world_console "vtttest companions $1" 'VTT_TEST_RESULT {"action":"companions"' \
         | grep -oP 'VTT_COMPANION_PROBE \K\{.*' | jq -s .
 }
 
 player_state() {
     local le_line pos dead health
-    le_line="$(server_le | grep -P '\[type=EntityPlayer, name=' | head -1 || true)"
-    [ -n "$le_line" ] || die "could not find the player in the server's 'le' output"
+    le_line="$(world_le | grep -P '\[type=EntityPlayer(Local)?, name=' | head -1 || true)"
+    [ -n "$le_line" ] || die "could not find the player in the 'le' output"
     pos="$(printf '%s' "$le_line" | grep -oP 'pos=\(\K[^)]+' || true)"
     dead="$(printf '%s' "$le_line" | grep -oP 'dead=\K[A-Za-z]+' || true)"
     health="$(printf '%s' "$le_line" | grep -oP 'health=\K-?[0-9]+' || true)"
@@ -156,12 +162,10 @@ player_state() {
           health: $health}'
 }
 
-log "step: le on the server (locating the player)"
-LE="$(server_le)"
-# The connected player is EntityPlayer on the server and EntityPlayerLocal on the client;
-# the entity id is the same on both.
-PLAYER_ID="$(printf '%s' "$LE" | grep -oP '\[type=EntityPlayer, name=[^,]*, id=\K[0-9]+' | head -1 || true)"
-[ -n "$PLAYER_ID" ] || die "could not find the player's entity id in the server's 'le' output"
+log "step: le (locating the player, TESTPILOT_MODE=${TESTPILOT_MODE:-connect})"
+LE="$(world_le)"
+PLAYER_ID="$(world_player_id "$LE")"
+[ -n "$PLAYER_ID" ] || die "could not find the player's entity id in the 'le' output"
 
 PLAYER_BEFORE_STATE="$(player_state)"
 log "player at start: $(printf '%s' "$PLAYER_BEFORE_STATE" | jq -c .)"
@@ -170,28 +174,28 @@ if [ "$(printf '%s' "$PLAYER_BEFORE_STATE" | jq -r '.dead')" = "true" ]; then
 fi
 
 log "spawning the stand-in companion (${COMPANION_PREFAB}) next to the player on the server"
-server_console_checked "se ${PLAYER_ID} ${COMPANION_PREFAB} 1" "Spawned" 20 >/dev/null
+world_console "se ${PLAYER_ID} ${COMPANION_PREFAB} 1" "Spawned" 20 >/dev/null
 log "spawning a turret (${TURRET_PREFAB}) next to the player on the server"
-server_console_checked "se ${PLAYER_ID} ${TURRET_PREFAB} 1" "Spawned" 20 >/dev/null
+world_console "se ${PLAYER_ID} ${TURRET_PREFAB} 1" "Spawned" 20 >/dev/null
 sleep 3
 
-LE="$(server_le)"
+LE="$(world_le)"
 COMPANION_ID="$(printf '%s' "$LE" | grep -oP "name=${COMPANION_PREFAB}, id=\K[0-9]+" | head -1 || true)"
 TURRET_ID="$(printf '%s' "$LE" | grep -oP "name=${TURRET_PREFAB}, id=\K[0-9]+" | head -1 || true)"
 [ -n "$COMPANION_ID" ] || die "could not find or spawn ${COMPANION_PREFAB}"
 [ -n "$TURRET_ID" ] || die "could not find or spawn ${TURRET_PREFAB}"
 log "companion id=${COMPANION_ID} turret id=${TURRET_ID}"
 
-log "marking ${COMPANION_ID} as hired and ${TURRET_ID} as player-owned, on the SERVER"
+log "marking ${COMPANION_ID} as hired and ${TURRET_ID} as player-owned, where the world lives"
 # The expect pattern doubles as the assertion: the marker line only appears when the harness
 # actually wrote it, so a silent no-op cannot slip past as "the command was delivered".
 MARK_OK='VTT_TEST_RESULT {"action":"mark","ok":true'
-server_console_checked "vtttest mark hired ${COMPANION_ID} ${PLAYER_ID}" "$MARK_OK" >/dev/null
-server_console_checked "vtttest mark owned ${TURRET_ID} ${PLAYER_ID}" "$MARK_OK" >/dev/null
+world_console "vtttest mark hired ${COMPANION_ID} ${PLAYER_ID}" "$MARK_OK" >/dev/null
+world_console "vtttest mark owned ${TURRET_ID} ${PLAYER_ID}" "$MARK_OK" >/dev/null
 
-PROBE_SERVER="$(probe_server "$PLAYER_ID")"
+PROBE_SERVER="$(probe_world "$PLAYER_ID")"
 PROBE_CLIENT="$(probe_client)"
-log "server probe: $(printf '%s' "$PROBE_SERVER" | jq -c '[.[] | {id: .entity_id, type, companion, would_match_ownership}]')"
+log "world probe: $(printf '%s' "$PROBE_SERVER" | jq -c '[.[] | {id: .entity_id, type, companion, would_match_ownership}]')"
 log "client probe: $(printf '%s' "$PROBE_CLIENT" | jq -c '[.[] | {id: .entity_id, type, companion, would_match_ownership}]')"
 
 # Both traders spawn at the player's position, so the trip lands on terrain already loaded -
@@ -199,10 +203,10 @@ log "client probe: $(printf '%s' "$PROBE_CLIENT" | jq -c '[.[] | {id: .entity_id
 # Spawned on the server for the same reason as everything else; the ids then mean the same
 # thing to the client, which is what runs `vtttest record` and the travel.
 log "spawning two traders on the server and recording them from the client"
-server_console_checked "se ${PLAYER_ID} npcTraderBob 1" "Spawned" 20 >/dev/null
-server_console_checked "se ${PLAYER_ID} npcTraderJen 1" "Spawned" 20 >/dev/null
+world_console "se ${PLAYER_ID} npcTraderBob 1" "Spawned" 20 >/dev/null
+world_console "se ${PLAYER_ID} npcTraderJen 1" "Spawned" 20 >/dev/null
 sleep 3
-LE="$(server_le)"
+LE="$(world_le)"
 BOB_ID="$(printf '%s' "$LE" | grep -oP 'name=npcTraderBob, id=\K[0-9]+' | head -1 || true)"
 JEN_ID="$(printf '%s' "$LE" | grep -oP 'name=npcTraderJen, id=\K[0-9]+' | head -1 || true)"
 if [ -z "$BOB_ID" ] || [ -z "$JEN_ID" ]; then
@@ -215,7 +219,7 @@ DEST_KEY="$(submit_and_check "vtttest list" | jq -r '.output' \
     | grep -oP '^\[vtttest\] \K[^\t]+' | tail -1 || true)"
 [ -n "$DEST_KEY" ] || die "no destination to travel to after recording two traders"
 
-LE_BEFORE="$(server_le)"
+LE_BEFORE="$(world_le)"
 PLAYER_POS_BEFORE="$(entity_position "$LE_BEFORE" "$PLAYER_ID")"
 COMPANION_BEFORE="$(entity_position "$LE_BEFORE" "$COMPANION_ID")"
 TURRET_BEFORE="$(entity_position "$LE_BEFORE" "$TURRET_ID")"
@@ -226,7 +230,7 @@ vtt_cmd teleport "$DEST_KEY" >/dev/null
 # The server prepares the destination before moving anyone, and the gather runs after arrival.
 sleep 20
 
-LE_AFTER="$(server_le)"
+LE_AFTER="$(world_le)"
 PLAYER_POS_AFTER="$(entity_position "$LE_AFTER" "$PLAYER_ID")"
 COMPANION_AFTER="$(entity_position "$LE_AFTER" "$COMPANION_ID")"
 TURRET_AFTER="$(entity_position "$LE_AFTER" "$TURRET_ID")"
@@ -239,18 +243,11 @@ fi
 PLAYER_AFTER_STATE="$(player_state)"
 log "player at end: $(printf '%s' "$PLAYER_AFTER_STATE" | jq -c .)"
 
-# The server's own account of the gather, which is the thing under test rather than a
-# reading of it. "Gathered N companion(s)" is only logged when N > 0.
-require_var DOCKER_COMPOSE_DIR
-# docker_server_latest_log picks the newest by mtime without parsing ls output.
-# shellcheck source=lib/docker-server.sh
-source "$ROOT_DIR/lib/docker-server.sh"
-SERVER_LOG="$(docker_server_latest_log)"
-GATHER_LOG=0
-if [ -n "$SERVER_LOG" ]; then
-    GATHER_LOG="$(grep -c 'VisitedTraderTeleport\] Gathered' "$SERVER_LOG" || true)"
-fi
-log "server logged ${GATHER_LOG} gather line(s)"
+# The game's own account of the gather, which is the thing under test rather than a reading
+# of it. "Gathered N companion(s)" is only logged when N > 0. Which log that is depends on
+# where the game is running - see world_log_grep_count.
+GATHER_LOG="$(world_log_grep_count 'VisitedTraderTeleport\] Gathered')"
+log "the game logged ${GATHER_LOG:-0} gather line(s)"
 
 to_json_pos() { printf '%s' "$1" | jq -R 'split(", ") | map(tonumber)'; }
 

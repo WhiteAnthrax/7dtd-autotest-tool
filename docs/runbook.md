@@ -305,12 +305,32 @@ asserted in one run.
 `--fresh-save` is the default here, unlike the other drivers: the scenario needs a living
 player and asserts it at both ends.
 
-**Everything about the entities happens on the server**, through `lib/server-console.sh`,
-and that is not incidental. `GatherCompanions` runs server-side, so an entity spawned or
-marked through the client command queue is invisible to the code under test - see
-`docs/lessons-learned.md`, which has the three separate wrong answers that came from getting
-this wrong. The probe is taken on both sides and both are recorded, so a marker written to
-the wrong process shows up as a disagreement rather than as a product bug.
+Run it **both ways**:
+
+```bash
+./bin/run-companion-check.sh --profile v3                     # dedicated server + client
+./bin/run-companion-check.sh --profile v3 --mode hostload     # the client hosts the world
+```
+
+That is not thoroughness for its own sake. Travel takes a different branch for a local player
+than for a remote one (`if (player is EntityPlayerLocal)` in `VisitedTraderTeleportService`),
+and each branch has its own `GatherCompanions` call site with a different centre. A
+dedicated-server run leaves the single-player path untested and vice versa.
+
+**Everything about the entities happens where the world lives**, through
+`lib/world-console.sh`, and that is not incidental: with a dedicated server that is the
+server process, and in hostload it is the client. `GatherCompanions` runs where the world is,
+so an entity spawned or marked on the other side is invisible to the code under test - see
+`docs/lessons-learned.md` for the several wrong answers that came from getting this wrong.
+The probe is taken on both sides and both are recorded, so a marker written to the wrong
+process shows up as a disagreement rather than as a product bug. (In hostload they are the
+same process and simply agree.)
+
+The same applies to the game's own log, which is the load-bearing evidence that a gather
+happened: the dedicated server writes `output_log__*.txt` next to its files, while a hosting
+client writes Unity's `Player.log` under `AppData\LocalLow\The Fun Pimps\7 Days To Die`.
+`world_log_grep_count` picks the right one; reading the wrong one is silent, and showed up
+as a run that counted zero gathers while the companion had visibly been moved.
 
 If the scenario fails it captures what the client was showing at the time into
 `output/<profile>/screenshots/companion/failure.jpg`. Most failures here are about what the

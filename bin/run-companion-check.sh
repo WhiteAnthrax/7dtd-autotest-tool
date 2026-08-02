@@ -10,7 +10,13 @@
 # is alive at both ends, and a save carrying a character an earlier run got killed fails it
 # before anything interesting happens.
 #
-# Usage: run-companion-check.sh --profile <v3|v26> [--keep-save] [--persistent-save]
+# Both topologies are worth running. Travel takes a different branch for a local player than
+# for a remote one - `if (player is EntityPlayerLocal)` in VisitedTraderTeleportService - and
+# each branch has its own GatherCompanions call site with a different centre. A run against
+# the dedicated server leaves the single-player path untested, and vice versa.
+#
+# Usage: run-companion-check.sh --profile <v3|v26> [--mode connect|hostload]
+#                               [--keep-save] [--persistent-save]
 set -uo pipefail
 
 BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,12 +26,16 @@ source "$ROOT_DIR/lib/common.sh"
 
 usage() {
     cat <<EOF
-Usage: $0 --profile <v3|v26> [--keep-save] [--persistent-save]
+Usage: $0 --profile <v3|v26> [--mode connect|hostload] [--keep-save] [--persistent-save]
 
 Spawns a stand-in companion and a turret, marks them the way SCore and a placed turret do,
 travels, and checks that the companion was gathered and the turret was not.
 
   --profile <name>     Which config/<name>.env to run against.
+  --mode <topology>    connect (default) joins the Docker dedicated server, so the world
+                       lives in the server process. hostload has the client host the world
+                       itself, with no server - which is the single-player travel path, and
+                       a different branch of the code.
   --persistent-save    Use the profile's normal save instead of a throwaway one. Only useful
                        for reproducing something on an existing world; the scenario needs a
                        living player, and a persistent save may not have one.
@@ -37,11 +47,13 @@ EOF
 }
 
 PROFILE=""
+MODE="connect"
 FRESH_SAVE=1
 KEEP_SAVE=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --profile) PROFILE="${2:-}"; shift 2 ;;
+        --mode) MODE="${2:-}"; shift 2 ;;
         --persistent-save) FRESH_SAVE=0; shift ;;
         --keep-save) KEEP_SAVE=1; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -53,6 +65,18 @@ if [ "$KEEP_SAVE" = "1" ] && [ "$FRESH_SAVE" = "0" ]; then
     die "--keep-save only applies to the throwaway save; drop --persistent-save"
 fi
 
+case "$MODE" in
+    connect|hostload) ;;
+    *) die "--mode must be connect or hostload (got '$MODE')" ;;
+esac
+export TESTPILOT_MODE="$MODE"
+
+# The throwaway-save machinery rewrites the *dedicated server's* config, which hostload never
+# reads - it hosts its own save under HOSTLOAD_GAME_NAME instead.
+if [ "$MODE" = "hostload" ]; then
+    FRESH_SAVE=0
+    KEEP_SAVE=0
+fi
 export TESTPILOT_FRESH_SAVE="$FRESH_SAVE"
 export TESTPILOT_KEEP_SAVE="$KEEP_SAVE"
 
@@ -71,7 +95,11 @@ cleanup() {
 trap cleanup EXIT
 
 STEP_STATUS="unknown"
-"$BIN_DIR/01-start-server.sh" "$PROFILE" || STEP_STATUS="start-server failed"
+# No dedicated server in hostload mode - starting it would only bind the port the hosting
+# client wants.
+if [ "$MODE" = "connect" ]; then
+    "$BIN_DIR/01-start-server.sh" "$PROFILE" || STEP_STATUS="start-server failed"
+fi
 if [ "$STEP_STATUS" = "unknown" ]; then
     "$BIN_DIR/02-build-mods.sh" "$PROFILE" || STEP_STATUS="build-mods failed"
 fi

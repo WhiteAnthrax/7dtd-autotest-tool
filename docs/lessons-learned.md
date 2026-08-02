@@ -638,3 +638,25 @@ The stand-in is a trader now: an `EntityAlive` that satisfies the same predicate
 where it is put, so any movement is attributable. Where a passive stand-in is not available,
 prefer evidence the system emits itself - here `GatherCompanions` logs
 `Gathered N companion(s)`, which a wandering animal cannot produce.
+
+## One topology is not the topology
+
+The companion scenario was green against a dedicated server and that felt like enough. It
+was not: travel branches on `player is EntityPlayerLocal`, and each branch has its own
+`GatherCompanions` call site with a different centre. A dedicated-server run never executes
+the single-player one.
+
+Making it run both ways cost about an hour and immediately produced two more instances of
+the same family of mistake - each quiet, each plausible:
+
+- **The READY wait was skipped.** Returning early to skip a server-only version check took
+  the wait with it, so the scenario ran against a client that had not finished loading a
+  world and reported that it could not find the player.
+- **The wrong log was read.** A hosting client writes Unity's `Player.log` under
+  `AppData\LocalLow\The Fun Pimps\7 Days To Die`, not the dedicated server's
+  `output_log__*.txt`. The run counted zero gathers while the companion had visibly been
+  moved to exactly the 1.8m the spot finder places it at.
+
+Both are the same shape as the earlier client/server mix-ups: a thing that exists in two
+places, and code that names one of them. The fix each time was an abstraction that asks
+"which side is this?" once - `lib/world-console.sh` - rather than remembering at every call.
