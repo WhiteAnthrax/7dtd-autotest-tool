@@ -19,7 +19,7 @@ strings) must be wrapped in escaped double quotes by the caller:
 
 ## PowerShell's own parameter binder can't tell a `-`-prefixed value from a new flag
 
-`Build-DebugMod.ps1` originally took `[string[]]$ExtraBuildArgs` so callers could pass
+`Build-Mod.ps1` (then `Build-DebugMod.ps1`) originally took `[string[]]$ExtraBuildArgs` so callers could pass
 `-p:GameFlavor=v26` straight through to `dotnet build`. Over `-File`, a value starting
 with `-` (like `-p:GameFlavor=v26`) gets mistaken by PowerShell's parameter binder for
 the start of a new named parameter, and the intended parameter ends up with no value at
@@ -769,3 +769,27 @@ over them. Ownership is a property of the environment, so it belongs in the envi
 The symptom is also worth recognising. It only appeared once `--fresh-save` was used against
 that instance; every earlier run there had written *inside* an existing mod directory that
 happened to be owned correctly, so the tree looked writable when it was not.
+
+## `git archive <branch>` packages the working copy's idea of that branch
+
+Both release lines had their PRs merged within three seconds of each other, and both packages
+were built a minute later. `main` had been pulled first; `v26-work` had not. `git archive`
+does not care - it archived the local branch, so the v2.6 ZIP was built from the commit
+*before* the one the release notes point at.
+
+Nothing caught it, and nothing would have:
+
+- The ZIP is named after the mod version, which had not changed.
+- The verification recorded the file name, then (after an earlier lesson) the sha256 - both of
+  which tie the ZIP to its *test run*, not to its *source*.
+- The two commits differed only in Debug-only code, so the shipped build was in fact
+  equivalent. That is luck, not a control: the next such slip could be a real fix.
+
+The step was manual, which is the actual defect. `bin/build-release-package.sh` now builds
+from a named ref, refuses when the local ref is behind its remote, and writes a
+`.provenance.json` recording the commit; `run-release-verification.sh` copies that into its
+result after checking it describes the file in front of it.
+
+General shape, worth recognising elsewhere: when a build reads state from the working copy
+(current branch, uncommitted files, a local checkout that may lag), the artifact's identity
+depends on something nobody wrote down. Either pin it explicitly or record what it was.

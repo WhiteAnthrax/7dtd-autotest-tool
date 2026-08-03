@@ -1,12 +1,17 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Generic Debug-build helper shared by VisitedTraderTeleport and SdtdTestPilot.
+    Generic build helper shared by VisitedTraderTeleport and SdtdTestPilot.
 
 .DESCRIPTION
     Scans the target csproj's own Reference/HintPath entries for refs\managed,
     refs\harmony, and (v2.6 line) refs\_v2.6_backup\{managed,harmony} paths, copies the
-    matching DLLs from GamePath, then runs `dotnet build -c Debug`.
+    matching DLLs from GamePath, then runs `dotnet build -c <Configuration>`.
+
+    Configuration defaults to Debug, which is what the test pipeline builds. Release is what
+    bin/build-release-package.sh asks for: the csproj's PackageMod target writes
+    dist\VisitedTraderTeleport-<version>.zip after every build, so a Release build here is
+    exactly the artifact that gets published.
 
     GameFlavor, if given, is passed as -p:GameFlavor=<value> to dotnet build (used by
     SdtdTestPilot.csproj's GAME_V26 define; VisitedTraderTeleport ignores it). It's a
@@ -20,6 +25,7 @@ param(
     [Parameter(Mandatory = $true)][string]$GamePath,
     [string]$RepositoryPath,
     [string]$GameFlavor,
+    [ValidateSet('Debug', 'Release')][string]$Configuration = 'Debug',
     [string]$DotNetPath = 'dotnet'
 )
 
@@ -94,8 +100,8 @@ foreach ($reference in $referencePlan) {
     Write-Output "Copied game reference: $($reference.Name)"
 }
 
-Write-Output "Building ($ProjectPath, Debug)..."
-$buildArgs = @($ProjectPath, '-c', 'Debug')
+Write-Output "Building ($ProjectPath, $Configuration)..."
+$buildArgs = @($ProjectPath, '-c', $Configuration)
 if (-not [string]::IsNullOrWhiteSpace($GameFlavor)) {
     $buildArgs += "-p:GameFlavor=$GameFlavor"
 }

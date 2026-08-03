@@ -234,15 +234,30 @@ fi
 # compares this against the file it is about to upload.
 PACKAGE_SHA="$(sha256sum "$PACKAGE" | cut -d' ' -f1)"
 
+# Which commit the ZIP was built from, when bin/build-release-package.sh made it. The sidecar
+# is checked against the file rather than trusted: a provenance naming a different build is
+# worse than none, so a mismatch drops it instead of recording a comfortable-looking lie.
+PROVENANCE="null"
+if [ -f "${PACKAGE}.provenance.json" ]; then
+    if [ "$(jq -r '.sha256 // ""' "${PACKAGE}.provenance.json")" = "$PACKAGE_SHA" ]; then
+        PROVENANCE="$(jq -c '{source_commit, ref, commit_subject}' "${PACKAGE}.provenance.json")"
+        log "built from $(jq -r '.ref' "${PACKAGE}.provenance.json") @ $(jq -r '.source_commit[0:12]' "${PACKAGE}.provenance.json")"
+    else
+        log "warn: ${PACKAGE}.provenance.json describes a different build of this ZIP, ignoring it"
+    fi
+else
+    log "warn: no provenance sidecar - this package was not built by bin/build-release-package.sh, so which commit it came from is not recorded"
+fi
+
 jq -n --arg profile "$PROFILE" --arg package "$(basename "$PACKAGE")" --arg status "$STEP_STATUS" \
-    --arg sha256 "$PACKAGE_SHA" \
+    --arg sha256 "$PACKAGE_SHA" --argjson provenance "$PROVENANCE" \
     --arg config_match "$CONFIG_MATCH" --argjson languages "$RESULTS_JSON" --argjson ok "$RUN_OK" \
     --argjson travel "$( [ "${TRAVEL_DONE:-0}" = "1" ] && cat "$OUTPUT_DIR/release-travel-verify.json" || echo null )" \
     --argjson companions "$( [ "${COMPANIONS_DONE:-0}" = "1" ] && cat "$OUTPUT_DIR/companion-verify.json" || echo null )" \
-    '{profile: $profile, package: $package, sha256: $sha256, status: $status,
-      packaged_config: $config_match,
+    '{profile: $profile, package: $package, sha256: $sha256, built_from: $provenance,
+      status: $status, packaged_config: $config_match,
       ok: $ok, travel: $travel, companions: $companions, languages: $languages}' > "$RESULT_FILE"
 
-echo "RELEASE_VERIFICATION_RESULT $(jq -c '{profile, package, sha256, status, packaged_config, ok, failed: [.languages[] | select(.ok | not) | .language]}' "$RESULT_FILE")"
+echo "RELEASE_VERIFICATION_RESULT $(jq -c '{profile, package, sha256, built_from, status, packaged_config, ok, failed: [.languages[] | select(.ok | not) | .language]}' "$RESULT_FILE")"
 
 [ "$RUN_OK" = "true" ]
