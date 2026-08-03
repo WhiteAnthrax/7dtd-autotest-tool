@@ -91,6 +91,19 @@ else
     rm -f "$SERVER_VTT_DIR/EnableTestHarness.txt"
 fi
 
+# SdtdTestPilot goes on the server as well as the client, because some of its commands have
+# to run where the world is. `testpilot mark` writes markers that server-side code reads, and
+# a dedicated server never sees anything the client-side copy wrote. (`testpilot dialog` is
+# the opposite - it needs LocalPlayerUI and only means anything on the client.)
+#
+# Gated by its own EnableTestPilot.txt marker, and removed again by 07-teardown.sh.
+log "deploying SdtdTestPilot to the server..."
+SERVER_TESTPILOT_DIR="$SERVER_MODS_DIR/SdtdTestPilot"
+mkdir -p "$SERVER_TESTPILOT_DIR"
+cp "$OUTPUT_DIR/SdtdTestPilot.debug.dll" "$SERVER_TESTPILOT_DIR/SdtdTestPilot.dll"
+cp "$OUTPUT_DIR/SdtdTestPilot.ModInfo.xml" "$SERVER_TESTPILOT_DIR/ModInfo.xml"
+: > "$SERVER_TESTPILOT_DIR/EnableTestPilot.txt"
+
 # Deploy the built Config/ too, not just the DLL - otherwise a Localization.csv or
 # dialogs.xml change is never actually loaded and the run silently verifies the previously
 # installed copy. The whole server mod dir was copied to SERVER_BACKUP_DIR above, so

@@ -34,6 +34,13 @@ VERDICT="$(jq '
          | ($dx * $dx + $dy * $dy + $dz * $dz) | sqrt | . * 100 | round / 100);
 
     {
+        # The probe reads the mod IsPlayerCompanion decision itself, so it only exists in a
+        # Debug build and is absent when this runs against a shipped package. It is diagnostic
+        # either way: what carries the verdict is that both markers were written, that
+        # something actually moved, and that the game logged a gather.
+        # (No apostrophes in here - the whole program is inside a single-quoted shell string.)
+        probe_available: ((.probe.server | length) > 0),
+        markers_written: (.markers_written // false),
         # The server probe is the one that counts - GatherCompanions runs there. The client
         # probe is recorded next to it so a marker written to the wrong process shows up as a
         # disagreement rather than as a mysterious product failure.
@@ -55,9 +62,14 @@ VERDICT="$(jq '
     | .turret_stayed = (.turret_moved <= 1)
     # And the setup was real - the turret did carry the ownership marker the old rule read,
     # so this is the situation that used to drag it along, not a turret that never qualified.
-    | .turret_setup_was_the_bug_condition = (.turret_would_match_ownership >= 1)
-    | .turret_not_a_companion = (.turret_is_companion == 0)
-    | .companion_recognised = (.companion_is_companion >= 1)
+    | .turret_setup_was_the_bug_condition = (if .probe_available then .turret_would_match_ownership >= 1 else .markers_written end)
+    # Only answerable with the probe. Without it the behavioural check carries this: an owned
+    # turret that the rule accepted would have been moved, and turret_stayed catches that.
+    | .turret_not_a_companion = (if .probe_available then .turret_is_companion == 0 else true end)
+    # With the probe: the mod itself says this is a companion. Without it: the marker a real
+    # hire writes was written, which is the same setup - the difference is only whether the
+    # mod can be asked directly.
+    | .companion_recognised = (if .probe_available then .companion_is_companion >= 1 else .markers_written end)
     # The load-bearing one. GatherCompanions logs "Gathered N companion(s)" only when it moved
     # something, so this comes from the code under test rather than from a reading of where an
     # entity happens to be - and unlike a position check it cannot be satisfied by a stand-in

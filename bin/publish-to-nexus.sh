@@ -104,22 +104,30 @@ PACKAGE_NAME="$(basename "$PACKAGE")"
 [ -n "$DISPLAY_NAME" ] || DISPLAY_NAME="$PACKAGE_NAME"
 
 # --- the gate -------------------------------------------------------------------------
-# Same package name AND ok:true. Name alone would pass a stale result from a previous
-# build of the same version, so the verification is re-run if anything about the ZIP
-# changed - which is the whole point of checking here rather than trusting a green run
-# somebody remembers having done.
+# Same bytes AND ok:true. The name alone is not enough and this was not theoretical: both
+# packages were rebuilt from a later commit, kept their version numbers, and would have
+# sailed through on a verification run two days earlier against different bytes. The sha256
+# is what makes "this exact file was verified" a fact rather than a recollection.
 VERIFY_FILE="$ROOT_DIR/output/$PROFILE/release-verification-result.json"
 [ -f "$VERIFY_FILE" ] || die "missing $VERIFY_FILE - run bin/run-release-verification.sh --profile $PROFILE --package $PACKAGE first"
 VERIFIED_PACKAGE="$(jq -r '.package // ""' "$VERIFY_FILE")"
 VERIFIED_OK="$(jq -r '.ok // false' "$VERIFY_FILE")"
 VERIFIED_CONFIG="$(jq -r '.packaged_config // "?"' "$VERIFY_FILE")"
+VERIFIED_SHA="$(jq -r '.sha256 // ""' "$VERIFY_FILE")"
 if [ "$VERIFIED_PACKAGE" != "$PACKAGE_NAME" ]; then
     die "the last verification was for '$VERIFIED_PACKAGE', not '$PACKAGE_NAME' - re-run bin/run-release-verification.sh for this package"
+fi
+PACKAGE_SHA="$(sha256sum "$PACKAGE" | cut -d' ' -f1)"
+if [ -z "$VERIFIED_SHA" ]; then
+    die "$VERIFY_FILE predates the sha256 check, so it cannot say which build it verified - re-run bin/run-release-verification.sh --profile $PROFILE --package $PACKAGE"
+fi
+if [ "$VERIFIED_SHA" != "$PACKAGE_SHA" ]; then
+    die "'$PACKAGE_NAME' was rebuilt since it was verified (verified ${VERIFIED_SHA:0:12}, about to upload ${PACKAGE_SHA:0:12}) - re-run bin/run-release-verification.sh for this build"
 fi
 if [ "$VERIFIED_OK" != "true" ]; then
     die "the last verification of '$PACKAGE_NAME' did not pass (see $VERIFY_FILE)"
 fi
-log "verification ok for $PACKAGE_NAME (packaged config: $VERIFIED_CONFIG)"
+log "verification ok for $PACKAGE_NAME sha256:${PACKAGE_SHA:0:12} (packaged config: $VERIFIED_CONFIG)"
 
 # --- credentials ----------------------------------------------------------------------
 if [ -z "${NEXUS_API_KEY:-}" ] && [ -f "$NEXUS_ENV_FILE" ]; then

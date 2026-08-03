@@ -26,6 +26,18 @@
 4. Restart the server once (`docker compose restart <service>` from
    `DOCKER_COMPOSE_DIR`) and confirm in its log that the new world actually starts
    (`grep 'StartGame done' <newest output_log__*.txt>`).
+5. **Make sure the account running this harness owns the server's `data/` tree.** The
+   pipeline rewrites `sdtdserver.xml` (throwaway saves), creates `Mods/SdtdTestPilot/`
+   and removes it again, so read access is not enough:
+
+   ```
+   ls -ld <DOCKER_COMPOSE_DIR>/data/serverfiles          # should be owned by you
+   sudo chown -R "$(id -u):$(id -g)" <DOCKER_COMPOSE_DIR>/data   # if it is not
+   ```
+
+   The compose files pass `UID/GID=1000`, so the container keeps working afterwards. Skipping
+   this shows up as `01-start-server.sh ... sed -i ... (exit 4)`, which is `sed` failing to
+   write the config rather than anything to do with the save.
 
 ## Running the full pipeline
 
@@ -252,15 +264,20 @@ Run this on the ZIP before publishing it:
 
 ```bash
 ./bin/run-release-verification.sh --profile v3 \
-    --package dist/VisitedTraderTeleport-0.7.10.zip \
+    --package dist/VisitedTraderTeleport-0.7.11.zip \
     --languages german,japanese --fresh-save
 ```
 
 Watch for `RELEASE_VERIFICATION_RESULT {... "packaged_config":"identical","ok":true ...}`.
 
+The result file records the ZIP's `sha256`, and `bin/publish-to-nexus.sh` refuses to upload
+a file whose hash does not match it. Rebuilding a package without re-verifying it is
+therefore caught rather than assumed: the version number stays the same across a rebuild,
+so the name alone never proved anything.
+
 It installs the ZIP on the server and client in place of the Debug build and drives it from
 `SdtdTestPilot`, which is a separate mod and therefore works against any build of the mod
-under test. Two things get checked:
+under test. Three things get checked:
 
 - **What it renders**, per language: the travel option is offered, the destination list has
   the expected entries, nothing the mod produced was dropped before it reached the screen,
@@ -274,7 +291,19 @@ under test. Two things get checked:
   records still in the save, and the player alive at the end. Screenshots in
   `output/<profile>/screenshots/travel/`.
 
-That second part is what a screenshot cannot reach: the store, key canonicalization, travel
+- **Who it takes along**, once: a hired companion and a placed turret are put next to the
+  player and marked the way the game marks them (`testpilot mark hired|owned`), and the run
+  asserts the companion moved with the player and the turret did not - issue #21. This only
+  covers the dedicated-server topology, because that is what this script starts. The
+  single-player path is a different branch of the mod (`if (player is EntityPlayerLocal)`)
+  and needs its own run:
+
+  ```bash
+  ./bin/run-companion-check.sh --profile v3 --mode hostload \
+      --package dist/VisitedTraderTeleport-0.7.11.zip
+  ```
+
+That travel part is what a screenshot cannot reach: the store, key canonicalization, travel
 readiness and cost logic all moved into `VisitedTraderTeleport.Core` between 0.7.9 and
 0.7.10, and a localization release can quietly carry that kind of change.
 

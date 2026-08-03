@@ -16,7 +16,7 @@
 # the dedicated server leaves the single-player path untested, and vice versa.
 #
 # Usage: run-companion-check.sh --profile <v3|v26> [--mode connect|hostload]
-#                               [--keep-save] [--persistent-save]
+#                               [--package <zip>] [--keep-save] [--persistent-save]
 set -uo pipefail
 
 BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,12 +26,17 @@ source "$ROOT_DIR/lib/common.sh"
 
 usage() {
     cat <<EOF
-Usage: $0 --profile <v3|v26> [--mode connect|hostload] [--keep-save] [--persistent-save]
+Usage: $0 --profile <v3|v26> [--mode connect|hostload] [--package <zip>]
+            [--keep-save] [--persistent-save]
 
 Spawns a stand-in companion and a turret, marks them the way SCore and a placed turret do,
 travels, and checks that the companion was gathered and the turret was not.
 
   --profile <name>     Which config/<name>.env to run against.
+  --package <zip>      Install the mod under test from a released ZIP instead of building it
+                       Debug. The markers this scenario needs come from SdtdTestPilot, which
+                       is a separate mod, so the whole check runs against exactly what users
+                       download. Without this the check only ever sees a Debug build.
   --mode <topology>    connect (default) joins the Docker dedicated server, so the world
                        lives in the server process. hostload has the client host the world
                        itself, with no server - which is the single-player travel path, and
@@ -48,12 +53,14 @@ EOF
 
 PROFILE=""
 MODE="connect"
+PACKAGE=""
 FRESH_SAVE=1
 KEEP_SAVE=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --profile) PROFILE="${2:-}"; shift 2 ;;
         --mode) MODE="${2:-}"; shift 2 ;;
+        --package) PACKAGE="${2:-}"; shift 2 ;;
         --persistent-save) FRESH_SAVE=0; shift ;;
         --keep-save) KEEP_SAVE=1; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -70,6 +77,13 @@ case "$MODE" in
     *) die "--mode must be connect or hostload (got '$MODE')" ;;
 esac
 export TESTPILOT_MODE="$MODE"
+
+if [ -n "$PACKAGE" ]; then
+    [ -f "$PACKAGE" ] || die "package not found: $PACKAGE"
+    VTT_RELEASE_PACKAGE="$(cd "$(dirname "$PACKAGE")" && pwd)/$(basename "$PACKAGE")"
+    export VTT_RELEASE_PACKAGE
+    log "checking the released package $(basename "$PACKAGE") rather than a Debug build"
+fi
 
 # The throwaway-save machinery rewrites the *dedicated server's* config, which hostload never
 # reads - it hosts its own save under HOSTLOAD_GAME_NAME instead.

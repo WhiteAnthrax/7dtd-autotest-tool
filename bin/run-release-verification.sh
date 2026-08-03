@@ -98,7 +98,8 @@ load_profile "$PROFILE"
 OUTPUT_DIR="$ROOT_DIR/output/$PROFILE"
 mkdir -p "$OUTPUT_DIR"
 RESULT_FILE="$OUTPUT_DIR/release-verification-result.json"
-rm -f "$RESULT_FILE" "$OUTPUT_DIR"/release-dialog-*.json "$OUTPUT_DIR"/release-verify-*.json
+rm -f "$RESULT_FILE" "$OUTPUT_DIR"/release-dialog-*.json "$OUTPUT_DIR"/release-verify-*.json \
+    "$OUTPUT_DIR/companion-result.json" "$OUTPUT_DIR/companion-verify.json"
 rm -rf "$OUTPUT_DIR/screenshots"
 
 cleanup() {
@@ -150,6 +151,7 @@ if [ "$STEP_STATUS" = "unknown" ]; then
     STEP_STATUS="ok"
     FIRST=1
     TRAVEL_DONE=0
+    COMPANIONS_DONE=0
     for lang in "${LANGUAGES[@]}"; do
         log "=== language: ${lang} ==="
         [ "$FIRST" = "1" ] || stop_client
@@ -179,6 +181,24 @@ if [ "$STEP_STATUS" = "unknown" ]; then
             fi
         fi
 
+        # Who travel takes along, also once. This is the only stage that covers issue #21
+        # (a placed turret being dragged to the trader), and leaving it out of the release
+        # gate would mean shipping on a companion check somebody remembers running against
+        # some build. It runs after travel because it needs the same live client and world,
+        # and it is language-independent for the same reason travel is.
+        #
+        # Only the dedicated-server topology is covered here, because that is what this
+        # script starts. The single-player path is a different branch of the mod and has to
+        # be run separately: bin/run-companion-check.sh --mode hostload --package <zip>.
+        if [ "$LANG_STATUS" = "ok" ] && [ "$COMPANIONS_DONE" = "0" ]; then
+            if "$BIN_DIR/05c-run-companion-scenario.sh" "$PROFILE" \
+                && "$BIN_DIR/06c-verify-companions.sh" "$PROFILE"; then
+                COMPANIONS_DONE=1
+            else
+                LANG_STATUS="companion verification failed"
+            fi
+        fi
+
         [ -f "$OUTPUT_DIR/release-dialog-result.json" ] && cp "$OUTPUT_DIR/release-dialog-result.json" "$OUTPUT_DIR/release-dialog-${lang}.json"
         [ -f "$OUTPUT_DIR/release-verify-result.json" ] && cp "$OUTPUT_DIR/release-verify-result.json" "$OUTPUT_DIR/release-verify-${lang}.json"
 
@@ -203,17 +223,26 @@ fi
 
 RUN_OK=false
 if [ "$STEP_STATUS" = "ok" ] && [ "$CONFIG_MATCH" = "identical" ] && [ "${TRAVEL_DONE:-0}" = "1" ] && \
+   [ "${COMPANIONS_DONE:-0}" = "1" ] && \
    [ "$(printf '%s' "$RESULTS_JSON" | jq '[.[] | select(.ok | not)] | length')" = "0" ] && \
    [ "$(printf '%s' "$RESULTS_JSON" | jq 'length')" != "0" ]; then
     RUN_OK=true
 fi
 
+# The hash, not just the name: a rebuilt ZIP keeps its version number, so recording only
+# the file name let a fresh build inherit an older build's green result. bin/publish-to-nexus.sh
+# compares this against the file it is about to upload.
+PACKAGE_SHA="$(sha256sum "$PACKAGE" | cut -d' ' -f1)"
+
 jq -n --arg profile "$PROFILE" --arg package "$(basename "$PACKAGE")" --arg status "$STEP_STATUS" \
+    --arg sha256 "$PACKAGE_SHA" \
     --arg config_match "$CONFIG_MATCH" --argjson languages "$RESULTS_JSON" --argjson ok "$RUN_OK" \
     --argjson travel "$( [ "${TRAVEL_DONE:-0}" = "1" ] && cat "$OUTPUT_DIR/release-travel-verify.json" || echo null )" \
-    '{profile: $profile, package: $package, status: $status, packaged_config: $config_match,
-      ok: $ok, travel: $travel, languages: $languages}' > "$RESULT_FILE"
+    --argjson companions "$( [ "${COMPANIONS_DONE:-0}" = "1" ] && cat "$OUTPUT_DIR/companion-verify.json" || echo null )" \
+    '{profile: $profile, package: $package, sha256: $sha256, status: $status,
+      packaged_config: $config_match,
+      ok: $ok, travel: $travel, companions: $companions, languages: $languages}' > "$RESULT_FILE"
 
-echo "RELEASE_VERIFICATION_RESULT $(jq -c '{profile, package, status, packaged_config, ok, failed: [.languages[] | select(.ok | not) | .language]}' "$RESULT_FILE")"
+echo "RELEASE_VERIFICATION_RESULT $(jq -c '{profile, package, sha256, status, packaged_config, ok, failed: [.languages[] | select(.ok | not) | .language]}' "$RESULT_FILE")"
 
 [ "$RUN_OK" = "true" ]

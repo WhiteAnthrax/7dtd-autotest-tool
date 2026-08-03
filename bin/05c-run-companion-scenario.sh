@@ -119,12 +119,27 @@ capture_on_failure() {
 }
 trap capture_on_failure EXIT
 
-vtt_cmd() {
+# Recording a visit and travelling both go through the trader dialog, driven from the client
+# with `testpilot dialog` - the same commands 05r and 05t use. Not `vtttest`: that lives in
+# the mod under test and so only exists in its Debug build, and this scenario has to be able
+# to run against the packaged Release build. The dialog is also what a player actually does.
+#
+# These are client-side on purpose even when the world lives on a server: XUiC_DialogWindowGroup
+# needs LocalPlayerUI, which only the client has.
+tp_dialog() {
     local result ok
-    result="$(submit_and_check "vtttest $*")"
+    result="$(submit_and_check "testpilot dialog $*")"
     ok="$(vtt_result_field "$result" ok)"
-    [ "$ok" = "true" ] || die "vtttest $* failed: $(printf '%s' "$result" | jq -r '.output')"
+    [ "$ok" = "true" ] || die "testpilot dialog $* failed: $(printf '%s' "$result" | jq -r '.output')"
     printf '%s' "$result"
+}
+
+tp_dialog_dump() {
+    local result dump
+    result="$(tp_dialog dump)"
+    dump="$(printf '%s' "$result" | jq -r '.output' | grep -oP '^TESTPILOT_DIALOG_DUMP \K.*' | tail -1 || true)"
+    [ -n "$dump" ] || die "no TESTPILOT_DIALOG_DUMP marker in: $(printf '%s' "$result" | jq -r '.output')"
+    printf '%s' "$dump"
 }
 
 # entity_position <le output> <entity id>: "x, y, z" as `le` printed it.
@@ -134,16 +149,21 @@ entity_position() {
 
 # Both sides answer the same question about the same entities. They should agree; when they do
 # not, the marker went to the wrong process.
+# `jq -s .` already turns "no probe lines at all" into [], so the grep must not be allowed to
+# fail the pipeline: under pipefail it did, the caller's `|| printf '[]'` then appended a
+# *second* [] to output that was already complete, and the result was the invalid JSON
+# "[]\n[]". Against a Release build there are never any probe lines, so this was the normal
+# path, not an edge case.
 probe_client() {
-    submit_and_check "vtttest companions" | jq -r '.output' \
-        | grep -oP '^VTT_COMPANION_PROBE \K.*' | jq -s .
+    { submit_and_check "vtttest companions" | jq -r '.output' \
+        | grep -oP '^VTT_COMPANION_PROBE \K.*' || true; } | jq -s .
 }
 
 probe_world() {
     # The result marker comes after every probe line, so waiting for it means the whole
     # listing has arrived rather than however much of it fitted in a fixed window.
-    world_console "vtttest companions $1" 'VTT_TEST_RESULT {"action":"companions"' \
-        | grep -oP 'VTT_COMPANION_PROBE \K\{.*' | jq -s .
+    { world_console "vtttest companions $1" 'VTT_TEST_RESULT {"action":"companions"' \
+        | grep -oP 'VTT_COMPANION_PROBE \K\{.*' || true; } | jq -s .
 }
 
 player_state() {
@@ -219,12 +239,25 @@ log "companion id=${COMPANION_ID} turret id=${TURRET_ID}"
 log "marking ${COMPANION_ID} as hired and ${TURRET_ID} as player-owned, where the world lives"
 # The expect pattern doubles as the assertion: the marker line only appears when the harness
 # actually wrote it, so a silent no-op cannot slip past as "the command was delivered".
-MARK_OK='VTT_TEST_RESULT {"action":"mark","ok":true'
-world_console "vtttest mark hired ${COMPANION_ID} ${PLAYER_ID}" "$MARK_OK" >/dev/null
-world_console "vtttest mark owned ${TURRET_ID} ${PLAYER_ID}" "$MARK_OK" >/dev/null
+# `testpilot mark`, not `vtttest mark`: it lives in SdtdTestPilot, which is a separate mod, so
+# this works against a Release build of the mod under test. A harness compiled into that mod
+# would only exist in its Debug build - and then the thing users download could never be the
+# thing this scenario checked.
+MARK_OK='TESTPILOT_RESULT {"action":"mark","ok":true'
+# world_console dies if the marker line never appears, so reaching the next line is itself
+# the proof that both markers were written. Recorded so the verdict can say so rather than
+# leaning on the Debug-only probe for it.
+world_console "testpilot mark hired ${COMPANION_ID} ${PLAYER_ID}" "$MARK_OK" >/dev/null
+world_console "testpilot mark owned ${TURRET_ID} ${PLAYER_ID}" "$MARK_OK" >/dev/null
+MARKERS_WRITTEN=true
 
-PROBE_SERVER="$(probe_world "$PLAYER_ID")"
-PROBE_CLIENT="$(probe_client)"
+# The probe reports what the mod's own IsPlayerCompanion decides, so it only exists in a Debug
+# build. It is diagnostic: the verdict rests on what actually moved and on the game's own
+# gather line, both of which a Release build produces. Empty here simply means "not available".
+PROBE_SERVER="$(probe_world "$PLAYER_ID" 2>/dev/null || true)"
+PROBE_CLIENT="$(probe_client 2>/dev/null || true)"
+[ -n "$PROBE_SERVER" ] || PROBE_SERVER='[]'
+[ -n "$PROBE_CLIENT" ] || PROBE_CLIENT='[]'
 log "world probe: $(printf '%s' "$PROBE_SERVER" | jq -c '[.[] | {id: .entity_id, type, companion, would_match_ownership}]')"
 log "client probe: $(printf '%s' "$PROBE_CLIENT" | jq -c '[.[] | {id: .entity_id, type, companion, would_match_ownership}]')"
 
@@ -237,12 +270,13 @@ BOB_ID="$(spawn_and_find npcTraderBob "spawnentityat npcTraderBob ${SPAWN_AT}")"
     || die "could not find or spawn npcTraderBob"
 JEN_ID="$(spawn_and_find npcTraderJen "spawnentityat npcTraderJen ${SPAWN_AT}")" \
     || die "could not find or spawn npcTraderJen"
-vtt_cmd record "$BOB_ID" >/dev/null
-vtt_cmd record "$JEN_ID" >/dev/null
-
-DEST_KEY="$(submit_and_check "vtttest list" | jq -r '.output' \
-    | grep -oP '^\[vtttest\] \K[^\t]+' | tail -1 || true)"
-[ -n "$DEST_KEY" ] || die "no destination to travel to after recording two traders"
+# Opening each trader's dialog is what records the visit - the mod's own patch does it, so
+# this exercises the shipped build rather than a test-only shortcut.
+log "recording both traders by opening their dialogs"
+for id in "$BOB_ID" "$JEN_ID"; do
+    tp_dialog open "$id" >/dev/null
+    tp_dialog close >/dev/null
+done
 
 LE_BEFORE="$(world_le)"
 PLAYER_POS_BEFORE="$(entity_position "$LE_BEFORE" "$PLAYER_ID")"
@@ -250,8 +284,23 @@ COMPANION_BEFORE="$(entity_position "$LE_BEFORE" "$COMPANION_ID")"
 TURRET_BEFORE="$(entity_position "$LE_BEFORE" "$TURRET_ID")"
 log "before travel - player:(${PLAYER_POS_BEFORE}) companion:(${COMPANION_BEFORE}) turret:(${TURRET_BEFORE})"
 
-log "step: vtttest teleport ${DEST_KEY}"
-vtt_cmd teleport "$DEST_KEY" >/dev/null
+# Travel the way a player does: open Bob, pick the travel option, pick the one destination
+# left in the list (the trader being talked to is filtered out of its own list, so that is
+# Jen - standing where the player already is, on terrain that is already loaded).
+log "travelling through the dialog"
+tp_dialog open "$BOB_ID" >/dev/null
+tp_dialog select vtt_open >/dev/null
+DEST_DUMP="$(tp_dialog_dump)"
+DEST_ID="$(printf '%s' "$DEST_DUMP" | jq -r '
+    [.entries[].id
+     | select(. != null)
+     | select(startswith("vtt_destination_")
+              and . != "vtt_destination_page_next"
+              and . != "vtt_destination_page_previous")] | first // empty')"
+[ -n "$DEST_ID" ] || die "no destination offered in the dialog: $DEST_DUMP"
+DEST_KEY="$(printf '%s' "$DEST_DUMP" | jq -r --arg id "$DEST_ID" '.entries[] | select(.id == $id) | .text')"
+log "travelling to ${DEST_ID} (${DEST_KEY})"
+tp_dialog select "$DEST_ID" >/dev/null
 # The server prepares the destination before moving anyone, and the gather runs after arrival.
 sleep 20
 
@@ -276,27 +325,38 @@ log "the game logged ${GATHER_LOG:-0} gather line(s)"
 
 to_json_pos() { printf '%s' "$1" | jq -R 'split(", ") | map(tonumber)'; }
 
+# jq reports a bad --argjson value as "invalid JSON text passed to --argjson" without saying
+# *which* one, and with sixteen of them that is a guessing game. Check each first and name it.
+json_arg() {
+    local name="$1" value="$2"
+    printf '%s' "$value" | jq -e . >/dev/null 2>&1 \
+        || die "the scenario produced no usable value for ${name} (got '${value}')"
+    printf '%s' "$value"
+}
+
 jq -n \
-    --argjson player_id "$PLAYER_ID" \
-    --argjson companion_id "$COMPANION_ID" \
-    --argjson turret_id "$TURRET_ID" \
+    --argjson player_id "$(json_arg player_id "$PLAYER_ID")" \
+    --argjson companion_id "$(json_arg companion_id "$COMPANION_ID")" \
+    --argjson turret_id "$(json_arg turret_id "$TURRET_ID")" \
     --arg destination_key "$DEST_KEY" \
-    --argjson probe_server "$PROBE_SERVER" \
-    --argjson probe_client "$PROBE_CLIENT" \
-    --argjson gather_log_lines "${GATHER_LOG:-0}" \
-    --argjson player_state_before "$PLAYER_BEFORE_STATE" \
-    --argjson player_state_after "$PLAYER_AFTER_STATE" \
-    --argjson player_before "$(to_json_pos "$PLAYER_POS_BEFORE")" \
-    --argjson player_after "$(to_json_pos "$PLAYER_POS_AFTER")" \
-    --argjson companion_before "$(to_json_pos "$COMPANION_BEFORE")" \
-    --argjson companion_after "$(to_json_pos "$COMPANION_AFTER")" \
-    --argjson turret_before "$(to_json_pos "$TURRET_BEFORE")" \
-    --argjson turret_after "$(to_json_pos "$TURRET_AFTER")" \
+    --argjson markers_written "$(json_arg markers_written "$MARKERS_WRITTEN")" \
+    --argjson probe_server "$(json_arg probe_server "$PROBE_SERVER")" \
+    --argjson probe_client "$(json_arg probe_client "$PROBE_CLIENT")" \
+    --argjson gather_log_lines "$(json_arg gather_log_lines "${GATHER_LOG:-0}")" \
+    --argjson player_state_before "$(json_arg player_state_before "$PLAYER_BEFORE_STATE")" \
+    --argjson player_state_after "$(json_arg player_state_after "$PLAYER_AFTER_STATE")" \
+    --argjson player_before "$(json_arg player_before "$(to_json_pos "$PLAYER_POS_BEFORE")")" \
+    --argjson player_after "$(json_arg player_after "$(to_json_pos "$PLAYER_POS_AFTER")")" \
+    --argjson companion_before "$(json_arg companion_before "$(to_json_pos "$COMPANION_BEFORE")")" \
+    --argjson companion_after "$(json_arg companion_after "$(to_json_pos "$COMPANION_AFTER")")" \
+    --argjson turret_before "$(json_arg turret_before "$(to_json_pos "$TURRET_BEFORE")")" \
+    --argjson turret_after "$(json_arg turret_after "$(to_json_pos "$TURRET_AFTER")")" \
     '{
         player_id: $player_id,
         companion_id: $companion_id,
         turret_id: $turret_id,
         destination_key: $destination_key,
+        markers_written: $markers_written,
         probe: {server: $probe_server, client: $probe_client},
         gather_log_lines: $gather_log_lines,
         player_state: {before: $player_state_before, after: $player_state_after},
