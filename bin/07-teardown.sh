@@ -46,7 +46,10 @@ if [ -n "${CLIENT_MODS_DIR:-}" ] && [ -n "${VTT_CLIENT_MOD_DIRNAME:-}" ] && [ -n
     CLIENT_VTT_DIR="${CLIENT_MODS_DIR}\\${VTT_CLIENT_MOD_DIRNAME}"
     CLIENT_BACKUP_DIR="${OMEN_SCRATCH_DIR}\\mod-backup"
     log "restoring client-side VisitedTraderTeleport from backup..."
-    run_on_omen_cmd "Copy-Item '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig' '${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll' -Force -ErrorAction SilentlyContinue; Remove-Item '${CLIENT_VTT_DIR}\\EnableTestHarness.txt' -Force -ErrorAction SilentlyContinue" \
+    # Test-Path rather than -ErrorAction SilentlyContinue: that leaves $? false even though
+    # it suppressed the error, so powershell.exe exits 1 and every teardown warned about a
+    # restore that had nothing to do (see docs/lessons-learned.md).
+    run_on_omen_cmd "if (Test-Path '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig') { Copy-Item '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig' '${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll' -Force } else { Write-Output 'NO_DLL_BACKUP' }; if (Test-Path '${CLIENT_VTT_DIR}\\EnableTestHarness.txt') { Remove-Item '${CLIENT_VTT_DIR}\\EnableTestHarness.txt' -Force }" \
         || log "warn: failed to restore client-side VisitedTraderTeleport (continuing)"
 
     # Config/ is deployed alongside the DLL by 03-deploy-mods.sh, so it has to be put back
@@ -73,6 +76,14 @@ fi
 if [ -n "${SERVER_MODS_DIR:-}" ]; then
     SERVER_VTT_DIR="$SERVER_MODS_DIR/VisitedTraderTeleport"
     SERVER_BACKUP_DIR="$OUTPUT_DIR/server-mod-backup"
+    # Unconditional: the driver mod is deployed whether or not there was a mod to back up,
+    # and a run that ends before the backup is taken would otherwise leave it installed.
+    if [ -d "${SERVER_MODS_DIR}/SdtdTestPilot" ]; then
+        log "removing SdtdTestPilot from the server..."
+        rm -rf "${SERVER_MODS_DIR}/SdtdTestPilot" \
+            || log "warn: failed to remove server-side SdtdTestPilot (continuing)"
+    fi
+
     if [ -d "$SERVER_BACKUP_DIR" ]; then
         log "restoring server-side VisitedTraderTeleport from backup..."
         cp -f "$SERVER_BACKUP_DIR/VisitedTraderTeleport.dll" "$SERVER_VTT_DIR/VisitedTraderTeleport.dll" \

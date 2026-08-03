@@ -686,3 +686,86 @@ Worth keeping: the assumption that a green run in one topology says much about t
 not a small one. Every single step of this scenario needed adjusting, and each adjustment was
 found by reading what the game actually reported rather than by reasoning about what should
 happen.
+
+## A fallback that appends: `cmd || printf '[]'` when cmd already printed
+
+The companion scenario got all the way through - markers written, both traders recorded,
+travel completed, `Gathered 1 companion(s)` in the server log - and then died assembling its
+result file:
+
+```
+jq: invalid JSON text passed to --argjson
+```
+
+The bad value was the diagnostic probe, captured as
+`PROBE_SERVER="$(probe_world "$PLAYER_ID" 2>/dev/null || printf '[]')"`. Against a *Release*
+package the probe command does not exist, so the `grep` for its output lines matched nothing
+and, under `pipefail`, failed the whole pipeline - even though the trailing `jq -s .` had
+already turned "no lines" into a perfectly good `[]`. The fallback then ran *in addition to*
+output that was already complete, and the variable ended up holding `[]\n[]`.
+
+Three things worth carrying forward:
+
+- **`||` is not "instead of", it is "as well as".** A fallback only substitutes when the
+  command printed nothing. If the command can print *and* fail, the two outputs concatenate.
+  Let the pipeline succeed (`{ ... || true; } | jq -s .`) and keep the fallback for the case
+  where nothing was produced at all.
+- **`pipefail` turns "grep found nothing" into "the command failed".** An empty match is a
+  normal result for a probe, not an error.
+- **`--argjson` will not tell you which argument was bad**, and this call had sixteen of
+  them. The values now go through a `json_arg <name> <value>` helper that validates each one
+  and names it in the failure, which turned a guessing game into one line of output.
+
+The tell was in the log the whole time: `world probe: []` was followed by a bare `[]` on the
+next line. A value printed across two lines where one was expected is worth a second look.
+
+## Do not build a harness command into the mod under test
+
+The same scenario also had to stop using `vtttest record` and `vtttest teleport`. Those are
+console commands compiled into VisitedTraderTeleport itself, behind a Debug-only guard - so
+the moment the check was pointed at the ZIP users actually download, they were not there:
+
+```
+*** ERROR: unknown command 'vtttest'
+```
+
+Recording a visit and travelling now go through `testpilot dialog open|select`, which lives
+in the separate SdtdTestPilot driver mod and only calls public game APIs. That means the
+scenario drives the shipped build the way a player does - opening the trader's dialog is what
+records the visit - instead of calling a shortcut that exists only in a build nobody ships.
+
+The general rule: a test hook compiled into the artifact under test can only ever verify a
+build that is not the one you ship. Put the hooks in a separate driver mod, and check the
+real package.
+
+## The harness needs to own the server's files, and one instance did not
+
+`--fresh-save` died on the v2.6 profile before anything started:
+
+```
+ERROR: 01-start-server.sh:53 failed (exit 4): sed -i -E "s|(<property name=\"GameName\"...
+```
+
+`sed -i` exit 4 is "could not write the file". That server's `data/` tree was owned by uid
+166535 - the id the container's own user ended up with when the instance was first created -
+while the v3.0 instance's tree was owned by the account running the harness. Both compose
+files pass `UID/GID=1000`, so this was a difference in how the two instances were set up, not
+in how they run.
+
+Three of the harness's stages need to write there: `01-start-server.sh` rewrites `GameName`
+in `sdtdserver.xml`, `03-deploy-mods.sh` creates `Mods/SdtdTestPilot/`, and `07-teardown.sh`
+removes it again. None of them can, without write access to that tree.
+
+The fix was to make the instance look like the other one:
+
+```
+sudo chown -R 1000:1000 /path/to/<instance>/data
+```
+
+Worth noting rather than papering over with `sudo` inside the scripts: files the harness
+creates as root stay root-owned, and the next run - or the game server itself - then trips
+over them. Ownership is a property of the environment, so it belongs in the environment.
+
+The symptom is also worth recognising. It only appeared once `--fresh-save` was used against
+that instance; every earlier run there had written *inside* an existing mod directory that
+happened to be owned correctly, so the tree looked writable when it was not.

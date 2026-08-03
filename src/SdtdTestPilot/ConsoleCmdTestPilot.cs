@@ -25,7 +25,8 @@ internal sealed class ConsoleCmdTestPilot : ConsoleCmdAbstract
     public override string getHelp()
     {
         return "testpilot <screenshot <absolute path without extension>|" +
-               "dialog <open <entityId>|dump|select <responseId>|close>>";
+               "dialog <open <entityId>|dump|select <responseId>|close>|" +
+               "mark <hired|owned> <entityId> [playerEntityId]>";
     }
 
     public override void Execute(List<string> _params, CommandSenderInfo _senderInfo)
@@ -45,9 +46,13 @@ internal sealed class ConsoleCmdTestPilot : ConsoleCmdAbstract
             case "dialog":
                 DialogDriver.Execute(_params);
                 break;
+            case "mark":
+                EntityMarker.Execute(_params);
+                break;
             default:
                 Output("[testpilot] usage: testpilot <screenshot <absolute path without extension>|" +
-                       "dialog <open <entityId>|dump|select <responseId>|close>>");
+                       "dialog <open <entityId>|dump|select <responseId>|close>|" +
+                       "mark <hired|owned> <entityId> [playerEntityId]>");
                 break;
         }
     }
