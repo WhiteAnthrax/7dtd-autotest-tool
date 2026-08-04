@@ -83,3 +83,28 @@ world_log_grep_count() {
             ;;
     esac
 }
+
+# world_spawn_entity <prefab> <spawn command>: spawns one entity and returns *its* id.
+#
+# Not "the first id with that name in `le`" - the world already has traders, and picking one
+# of those instead of the entity just created is silent: the id is real, the entity exists,
+# and only something later fails. A paging run picked up a world trader 120m away and then
+# could not open its dialog; the previous scenarios had simply been lucky.
+#
+# So the ids for that prefab are read before and after, and the difference is the answer.
+world_spawn_entity() {
+    local prefab="$1" spawn_cmd="$2" before after new_id attempt
+    before="$(world_le | grep -oP "name=${prefab}, id=\K[0-9]+" | sort -u || true)"
+    for attempt in 1 2 3; do
+        world_console "$spawn_cmd" "" 10 >/dev/null
+        sleep 3
+        after="$(world_le | grep -oP "name=${prefab}, id=\K[0-9]+" | sort -u || true)"
+        new_id="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | head -1 || true)"
+        if [ -n "$new_id" ]; then
+            printf '%s' "$new_id"
+            return 0
+        fi
+        log "attempt ${attempt}: no new ${prefab} appeared in the entity list yet"
+    done
+    return 1
+}

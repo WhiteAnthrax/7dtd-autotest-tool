@@ -326,9 +326,27 @@ comparison is what carries the sweep's result over to the release: the translati
 entirely in those files and the DLL only looks keys up. (Compare against the deployed copy,
 never `git show`, whose LF form differs from the CRLF packaged one.)
 
-What it deliberately does not cover is paging. Seeding a long destination list needs the
-mod's internals, so the five real traders it records give one page. Paging boundaries stay
-the Debug sweep's job, and they transfer precisely because the packaged `Config/` matches.
+Paging and long-distance travel used to be listed here as things it does not cover. They now
+have scenarios of their own, run through `bin/run-scenario-check.sh`:
+
+```bash
+./bin/run-scenario-check.sh --scenario distance --profile v3   # 1000m trip, both topologies
+./bin/run-scenario-check.sh --scenario paging   --profile v3   # seven destinations, two pages
+./bin/run-scenario-check.sh --scenario companion --profile v3  # issue #21
+```
+
+**distance** is the one that matters most. Every other travel scenario spawns its traders at
+the player's feet, so the destination is already loaded and the mod skips preparation
+entirely - a 0m trip logs `Teleported` and nothing else. This one records a trader, moves the
+player 1000m away (`TRAVEL_DISTANCE` to change it), and travels back, so `Preparing
+destination` / `Destination ready after preparation` actually run and are asserted, along
+with no queue expiry, no `Destination was not ready`, and a player who is still alive at the
+far end.
+
+**paging** records seven destinations - four different traders where the player stands, then
+three more 400m away, because traders near each other share one destination key - and walks
+the two pages, checking that nothing is duplicated or dropped between them and that the
+page controls are localized.
 
 ## Checking who travel takes along
 
