@@ -45,7 +45,7 @@ copy_to_omen "$TMP_VTT_TAR" "${WORK_REMOTE_VTT}\\vtt.tar.gz"
 run_on_omen_cmd "tar -xzf '${WORK_REMOTE_VTT}\\vtt.tar.gz' -C '${WORK_REMOTE_VTT}'"
 
 log "building VisitedTraderTeleport (Debug)..."
-run_on_omen_script "$ROOT_DIR/lib/windows/Build-DebugMod.ps1" \
+run_on_omen_script "$ROOT_DIR/lib/windows/Build-Mod.ps1" \
     -ProjectPath "\"${WORK_REMOTE_VTT}\\src\\VisitedTraderTeleport\\VisitedTraderTeleport.csproj\"" \
     -GamePath "\"${CLIENT_GAME_PATH}\"" \
     -RepositoryPath "\"${WORK_REMOTE_VTT}\""
@@ -75,7 +75,7 @@ copy_to_omen "$TMP_TESTPILOT_TAR" "${WORK_REMOTE_TESTPILOT}\\testpilot.tar.gz"
 run_on_omen_cmd "tar -xzf '${WORK_REMOTE_TESTPILOT}\\testpilot.tar.gz' -C '${WORK_REMOTE_TESTPILOT}'"
 
 log "building SdtdTestPilot (Debug, GameFlavor=$GAME_FLAVOR)..."
-run_on_omen_script "$ROOT_DIR/lib/windows/Build-DebugMod.ps1" \
+run_on_omen_script "$ROOT_DIR/lib/windows/Build-Mod.ps1" \
     -ProjectPath "\"${WORK_REMOTE_TESTPILOT}\\src\\SdtdTestPilot\\SdtdTestPilot.csproj\"" \
     -GamePath "\"${CLIENT_GAME_PATH}\"" \
     -RepositoryPath "\"${WORK_REMOTE_TESTPILOT}\"" \

@@ -260,18 +260,31 @@ and `vtttest dialog` only exist when `VTT_TEST_HARNESS` is defined, and
 Release build with no harness in it, so a green sweep says nothing about the packaged zip
 on its own.
 
-Run this on the ZIP before publishing it:
+Build the ZIP with the script rather than by hand, so which commit it came from is recorded:
+
+```bash
+./bin/build-release-package.sh --profile v3            # builds VTT_BRANCH's tip
+./bin/build-release-package.sh --profile v26 --ref v26-work
+```
+
+It writes `output/<profile>/dist/VisitedTraderTeleport-<version>.zip` plus a
+`.provenance.json` naming the commit, and refuses to build a local branch that is behind its
+remote - which is how a v2.6 package once got built from the commit *before* its release
+commit, minutes after the PR was merged, because only the other line had been pulled.
+
+Then run this on the ZIP before publishing it:
 
 ```bash
 ./bin/run-release-verification.sh --profile v3 \
-    --package dist/VisitedTraderTeleport-0.7.11.zip \
+    --package output/v3/dist/VisitedTraderTeleport-0.7.11.zip \
     --languages german,japanese --fresh-save
 ```
 
 Watch for `RELEASE_VERIFICATION_RESULT {... "packaged_config":"identical","ok":true ...}`.
 
-The result file records the ZIP's `sha256`, and `bin/publish-to-nexus.sh` refuses to upload
-a file whose hash does not match it. Rebuilding a package without re-verifying it is
+The result file records the ZIP's `sha256` and, from the provenance sidecar, the commit it
+was built from; `bin/publish-to-nexus.sh` refuses to upload a file whose hash does not match
+it. Rebuilding a package without re-verifying it is
 therefore caught rather than assumed: the version number stays the same across a rebuild,
 so the name alone never proved anything.
 
@@ -300,7 +313,7 @@ under test. Three things get checked:
 
   ```bash
   ./bin/run-companion-check.sh --profile v3 --mode hostload \
-      --package dist/VisitedTraderTeleport-0.7.11.zip
+      --package output/v3/dist/VisitedTraderTeleport-0.7.11.zip
   ```
 
 That travel part is what a screenshot cannot reach: the store, key canonicalization, travel

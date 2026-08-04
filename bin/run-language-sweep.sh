@@ -119,6 +119,7 @@ export TESTPILOT_KEEP_SAVE="$KEEP_SAVE"
 
 load_profile "$PROFILE"
 
+hold_profile_lock "$PROFILE"
 OUTPUT_DIR="$ROOT_DIR/output/$PROFILE"
 mkdir -p "$OUTPUT_DIR"
 RESULT_FILE="$OUTPUT_DIR/language-sweep-result.json"
