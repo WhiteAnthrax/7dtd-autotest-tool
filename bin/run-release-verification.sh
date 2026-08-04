@@ -96,6 +96,7 @@ export TESTPILOT_KEEP_SAVE="$KEEP_SAVE"
 load_profile "$PROFILE"
 
 hold_profile_lock "$PROFILE"
+hold_dedicated_server_lock
 OUTPUT_DIR="$ROOT_DIR/output/$PROFILE"
 mkdir -p "$OUTPUT_DIR"
 RESULT_FILE="$OUTPUT_DIR/release-verification-result.json"

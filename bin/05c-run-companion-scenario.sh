@@ -190,13 +190,13 @@ player_state() {
 # issued then quietly does nothing. That failure was diagnosed in one look at the screenshot
 # the scenario captures - the game was showing a loading tip - and retrying is the honest fix,
 # since there is no readiness signal beyond "the thing I asked for is there".
+# world_spawn_entity returns the id of the entity this call created, rather than the first
+# one with that name: worlds ship with their own traders, and grabbing one of those is a
+# valid id for the wrong entity - which then fails somewhere unrelated.
 spawn_and_find() {
     local prefab="$1" command="$2" attempt id
-    for attempt in 1 2 3 4 5 6; do
-        world_console "$command" "Spawned" 20 >/dev/null
-        sleep 3
-        id="$(printf '%s' "$(world_le)" | grep -oP "name=${prefab}, id=\\K[0-9]+" | head -1 || true)"
-        if [ -n "$id" ]; then
+    for attempt in 1 2; do
+        if id="$(world_spawn_entity "$prefab" "$command")"; then
             [ "$attempt" -gt 1 ] && log "  ${prefab} appeared on attempt ${attempt}"
             printf '%s' "$id"
             return 0

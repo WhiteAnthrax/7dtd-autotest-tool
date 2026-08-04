@@ -72,6 +72,19 @@ if [ -n "${OMEN_QUEUE_DIR:-}" ]; then
         || log "warn: failed to remove queue dir (continuing)"
 fi
 
+# --- Server side: skipped entirely when the client hosted the world ---
+#
+# There is no dedicated server in a hostload run: 03-deploy-mods.sh does not deploy to it and
+# 01-start-server.sh never ran. Restoring and restarting it anyway does not just waste time,
+# it *starts a server that should not be running* - and because both profiles publish the
+# same ports, that server then blocks the next connect run. A hostload teardown was timing
+# out here waiting for a log file from a server nobody asked for.
+if [ "${TESTPILOT_MODE:-connect}" = "hostload" ]; then
+    log "hostload: no dedicated server was involved, skipping the server-side teardown"
+    log "teardown complete"
+    exit 0
+fi
+
 # --- Server: restore mod ---
 if [ -n "${SERVER_MODS_DIR:-}" ]; then
     SERVER_VTT_DIR="$SERVER_MODS_DIR/VisitedTraderTeleport"

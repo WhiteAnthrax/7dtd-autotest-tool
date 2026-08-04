@@ -824,3 +824,54 @@ Two things worth keeping:
   the fourth time in this pipeline. Every time, the check was the problem.
 - **Teardown is part of the run.** "The result line printed" is not "the run finished" - the
   driver still has a server to restart, a client to stop and files to clean up.
+
+## Do not edit a shell script while a run of it is in flight
+
+A v2.6 run died with:
+
+```
+./bin/run-scenario-check.sh: line 173: unexpected EOF while looking for matching `"'
+```
+
+The script was fine - shellcheck had just passed on it. It died because the file was edited
+*while that run was executing*: bash reads a script incrementally, remembering a byte offset,
+so rewriting the file underneath a running instance makes it resume in the middle of whatever
+is now at that offset. Adding one scenario to a `case` shifted everything below it.
+
+Cheap habit: when a run is in the background, either wait for it or edit a copy. The failure
+looks like a syntax error in code that has none, which is a bad way to spend ten minutes.
+
+## Two traders standing near each other are one destination
+
+Testing paging needs more than five recorded destinations, and recording is just opening a
+trader's dialog - so the obvious move is to spawn seven traders and open each one. It
+produced an empty list.
+
+The mod builds a destination key as `{npcID}:{areaX}:{areaZ}`
+(`VisitedTraderStore.GetKey`), where `areaX`/`areaZ` come from the trader's *trader area*
+when it has one and from its rounded position otherwise. Spawned traders standing a few
+metres apart end up in the same area, so seven copies of one prefab collapsed into a single
+destination - which was then filtered out of its own list, leaving nothing to page through.
+
+The save made it unambiguous:
+
+```json
+"traitorjoel:478:1093": { "PositionX": 472.0, "AreaX": 478, "AreaZ": 1093 }
+```
+
+One key, and a stored position that belongs to a different trader than the one that created
+it. Position and identity are not the same thing here.
+
+So the scenario records two groups: four *different* traders where the player stands, then
+the player is moved 400m and three more are recorded there. Different `npcID` distinguishes
+traders in one place; being somewhere else distinguishes the same `npcID`. Seven distinct
+destinations, six after the one being talked to is filtered, which is exactly two pages.
+
+Two things this cost, both worth avoiding next time:
+
+- **The first diagnosis was wrong** ("the spawn coordinates are being ignored"), and the run
+  that disproved it was the one that logged where each trader actually stood: 454, 460, 466,
+  478... all distinct. Log the observed value, not the requested one.
+- **The scenario failed three steps downstream of the real problem** ("no next-page entry"),
+  which reads as a pager bug. It now fails at the point the count is wrong, and says how many
+  destinations it actually got.

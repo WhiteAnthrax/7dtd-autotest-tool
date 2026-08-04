@@ -66,6 +66,27 @@ hold_profile_lock() {
     fi
 }
 
+# hold_dedicated_server_lock: serialises everything that starts the Docker dedicated server.
+#
+# hold_profile_lock is not enough. The two profiles are different servers with different
+# compose files, but they publish the *same host ports*, so only one of them can run at a
+# time. Starting the v2.6 server while the v3.0 one was still shutting down failed with
+#
+#   Error response from daemon: failed to set up container networking: driver failed
+#   programming external connectivity on endpoint 7dtdserver-v26-wasteland
+#
+# which reads like a Docker problem rather than "something else is using the ports". Teardown
+# restarts the server on its way out, so the window is wider than the run itself.
+hold_dedicated_server_lock() {
+    local lock_dir="${ROOT_DIR:?}/output"
+    mkdir -p "$lock_dir"
+    exec 8>"${lock_dir}/.dedicated-server.lock"
+    if ! flock -n 8; then
+        log "waiting for the dedicated server to be free (another profile is using it)..."
+        flock -w 900 8 || die "timed out waiting for the dedicated server to be free"
+    fi
+}
+
 # Redacts values that look like secrets before they hit logs. Currently a no-op
 # passthrough for IPs/paths (not secret, just environment-specific) but kept as
 # a single choke point in case a profile ever needs a real secret.
