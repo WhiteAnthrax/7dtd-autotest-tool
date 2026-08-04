@@ -45,6 +45,27 @@ effective_game_save_name() {
     fi
 }
 
+# hold_profile_lock <profile>: refuses to start when another run is already using this
+# profile's output directory.
+#
+# Two runs against one profile do not fail loudly, they corrupt each other's answers. That is
+# not hypothetical: a release verification was started while the previous run's teardown was
+# still finishing, the old teardown deleted the new run's fresh-save-name.txt on its way out,
+# and the travel check then looked for this run's visit records in the *persistent* save and
+# reported the package broken. The travel had actually worked.
+#
+# The lock is held by keeping a file descriptor open, so it is released when the process exits
+# for any reason - including being killed - without needing a trap.
+hold_profile_lock() {
+    local profile="$1"
+    local lock_dir="${ROOT_DIR:?}/output/${profile}"
+    mkdir -p "$lock_dir"
+    exec 9>"${lock_dir}/.run.lock"
+    if ! flock -n 9; then
+        die "another run is already using output/${profile} (its teardown may still be finishing) - wait for it to end"
+    fi
+}
+
 # Redacts values that look like secrets before they hit logs. Currently a no-op
 # passthrough for IPs/paths (not secret, just environment-specific) but kept as
 # a single choke point in case a profile ever needs a real secret.
