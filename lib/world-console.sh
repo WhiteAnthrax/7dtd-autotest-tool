@@ -65,12 +65,24 @@ world_player_id() {
 #              %USERPROFILE%\AppData\LocalLow\The Fun Pimps\7 Days To Die\Player.log
 #              (not the game folder, and not the older AppData\Roaming location that still
 #              has stale files in it).
+# client_log_grep_count <pattern>: how many lines matching <pattern> the *client* logged,
+# whichever topology this is.
+#
+# Not everything the mod does is server-side even when there is a server. Charging a remote
+# player happens on their client ("Consumed local travel cost for ..."), as does the warning
+# when it removed the wrong number of items - so counting those in the server's log finds
+# nothing and says the code never ran.
+client_log_grep_count() {
+    local pattern="$1"
+    run_on_omen_cmd "\$p = Join-Path \$env:USERPROFILE 'AppData\\LocalLow\\The Fun Pimps\\7 Days To Die\\Player.log'; if (Test-Path \$p) { (Select-String -Path \$p -Pattern '${pattern}' -AllMatches | Measure-Object).Count } else { 0 }" \
+        | tr -d '\r' | grep -oE '^[0-9]+' | head -1 || printf '0'
+}
+
 world_log_grep_count() {
     local pattern="$1"
     case "${TESTPILOT_MODE:-connect}" in
         hostload)
-            run_on_omen_cmd "\$p = Join-Path \$env:USERPROFILE 'AppData\\LocalLow\\The Fun Pimps\\7 Days To Die\\Player.log'; if (Test-Path \$p) { (Select-String -Path \$p -Pattern '${pattern}' -AllMatches | Measure-Object).Count } else { 0 }" \
-                | tr -d '\r' | grep -oE '^[0-9]+' | head -1 || printf '0'
+            client_log_grep_count "$pattern"
             ;;
         connect)
             local log

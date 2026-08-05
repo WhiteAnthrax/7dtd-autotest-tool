@@ -333,6 +333,7 @@ have scenarios of their own, run through `bin/run-scenario-check.sh`:
 ./bin/run-scenario-check.sh --scenario distance --profile v3   # 1000m trip, both topologies
 ./bin/run-scenario-check.sh --scenario paging   --profile v3   # seven destinations, two pages
 ./bin/run-scenario-check.sh --scenario companion --profile v3  # issue #21
+./bin/run-scenario-check.sh --scenario cost      --profile v3   # travel cost + confirmation
 ```
 
 **distance** is the one that matters most. Every other travel scenario spawns its traders at
@@ -342,6 +343,15 @@ player 1000m away (`TRAVEL_DISTANCE` to change it), and travels back, so `Prepar
 destination` / `Destination ready after preparation` actually run and are asserted, along
 with no queue expiry, no `Destination was not ready`, and a player who is still alive at the
 far end.
+
+**cost** switches `<TravelCost>` on in the *installed* config (03c, which has to run before
+the client starts - the mod reads that file at world load and there is no reload) and then
+travels twice: once with nothing to pay with, which must be refused without taking anything,
+and once after `testpilot inventory give`, which must cost exactly the configured amount. It
+also covers the confirmation screen, which only appears when a trip costs something and so
+has never been rendered by any other scenario. `COST_ITEM` / `COST_PER_METER` /
+`COST_MINIMUM` change the terms; the default charges a floor of 7 casino tokens so the
+expected number does not depend on the distance.
 
 **paging** records seven destinations - four different traders where the player stands, then
 three more 400m away, because traders near each other share one destination key - and walks

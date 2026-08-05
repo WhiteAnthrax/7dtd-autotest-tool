@@ -35,6 +35,32 @@ TMP_VTT_TAR=""
 TMP_TESTPILOT_TAR=""
 trap 'rm -f "$TMP_VTT_TAR" "$TMP_TESTPILOT_TAR"' EXIT
 
+# Both mods are built from `git archive`, which sees committed content and nothing else. That
+# is deliberate - it is what makes a build reproducible from a ref - but it means edits still
+# sitting in the working tree are silently absent from what gets deployed. It has now cost two
+# debugging sessions: once on the mod under test, once on the driver, where the freshly added
+# `testpilot inventory` command was simply not there and the console answered with a usage
+# line for the older build.
+#
+# So: refuse, rather than build something that is not what the author is looking at.
+warn_if_dirty() {
+    local repo="$1" label="$2"
+    shift 2
+    local dirty
+    dirty="$(git -C "$repo" status --porcelain -- "$@" 2>/dev/null || true)"
+    [ -n "$dirty" ] || return 0
+    log "uncommitted changes in ${label} that this build would NOT include:"
+    printf '%s\n' "$dirty" | sed 's/^/    /'
+    if [ "${ALLOW_DIRTY_BUILD:-0}" = "1" ]; then
+        log "continuing anyway because ALLOW_DIRTY_BUILD=1 - the build is from the last commit"
+        return 0
+    fi
+    die "commit them first (git archive builds the committed tree), or set ALLOW_DIRTY_BUILD=1 to build the last commit on purpose"
+}
+
+warn_if_dirty "$VTT_REPO_PATH" "VisitedTraderTeleport" src mod
+warn_if_dirty "$TESTPILOT_REPO_PATH" "SdtdTestPilot" src/SdtdTestPilot
+
 log "archiving VisitedTraderTeleport@$VTT_BRANCH..."
 TMP_VTT_TAR="$(mktemp --suffix=.tar.gz)"
 git -C "$VTT_REPO_PATH" archive "$VTT_BRANCH" | gzip > "$TMP_VTT_TAR"

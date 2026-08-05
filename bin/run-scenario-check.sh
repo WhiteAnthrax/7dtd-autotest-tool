@@ -19,7 +19,7 @@
 # for a remote one - `if (player is EntityPlayerLocal)` in VisitedTraderTeleportService - and
 # a run against the dedicated server leaves the single-player path untested, and vice versa.
 #
-# Usage: run-scenario-check.sh --scenario <companion|distance|paging> --profile <v3|v26>
+# Usage: run-scenario-check.sh --scenario <companion|distance|paging|cost> --profile <v3|v26>
 #                              [--mode connect|hostload] [--package <zip>]
 #                              [--keep-save] [--persistent-save]
 set -uo pipefail
@@ -31,7 +31,7 @@ source "$ROOT_DIR/lib/common.sh"
 
 usage() {
     cat <<EOF
-Usage: $0 --scenario <companion|distance|paging> --profile <v3|v26> [--mode connect|hostload]
+Usage: $0 --scenario <companion|distance|paging|cost> --profile <v3|v26> [--mode connect|hostload]
             [--package <zip>] [--keep-save] [--persistent-save]
 
   --scenario <name>    Which scenario to run:
@@ -43,6 +43,10 @@ Usage: $0 --scenario <companion|distance|paging> --profile <v3|v26> [--mode conn
                                      how far (default 1000).
                          paging    - records seven traders so the destination list needs two
                                      pages, and walks them.
+                         cost      - switches the travel cost on and checks that a trip is
+                                     refused with nothing to pay with, and costs exactly the
+                                     configured amount with. COST_ITEM / COST_PER_METER /
+                                     COST_MINIMUM to change the terms.
   --profile <name>     Which config/<name>.env to run against.
   --package <zip>      Install the mod under test from a released ZIP instead of building it
                        Debug, so the check runs against exactly what users download.
@@ -58,6 +62,7 @@ EOF
 }
 
 SCENARIO=""
+PREPARE_STAGE=""
 PROFILE=""
 MODE="connect"
 PACKAGE=""
@@ -84,7 +89,12 @@ case "$SCENARIO" in
                RESULT_PREFIX="distance-travel"; MARKER="DISTANCE_CHECK_RESULT" ;;
     paging)    SCENARIO_STAGE="05p-run-paging-scenario.sh"; VERIFY_STAGE="06p-verify-paging.sh"
                RESULT_PREFIX="paging"; MARKER="PAGING_CHECK_RESULT" ;;
-    *) usage; die "--scenario must be companion, distance or paging (got '${SCENARIO:-}')" ;;
+    cost)      SCENARIO_STAGE="05x-run-travel-cost-scenario.sh"; VERIFY_STAGE="06x-verify-travel-cost.sh"
+               RESULT_PREFIX="travel-cost"; MARKER="COST_CHECK_RESULT"
+               # The mod reads its config when the world loads, so the setting has to be in
+               # place before the client starts - not when the scenario runs.
+               PREPARE_STAGE="03c-configure-travel-cost.sh" ;;
+    *) usage; die "--scenario must be companion, distance, paging or cost (got '${SCENARIO:-}')" ;;
 esac
 
 if [ "$KEEP_SAVE" = "1" ] && [ "$FRESH_SAVE" = "0" ]; then
@@ -142,6 +152,9 @@ if [ "$STEP_STATUS" = "unknown" ]; then
 fi
 if [ "$STEP_STATUS" = "unknown" ]; then
     "$BIN_DIR/03-deploy-mods.sh" "$PROFILE" || STEP_STATUS="deploy-mods failed"
+fi
+if [ "$STEP_STATUS" = "unknown" ] && [ -n "$PREPARE_STAGE" ]; then
+    "$BIN_DIR/$PREPARE_STAGE" "$PROFILE" || STEP_STATUS="${SCENARIO} preparation failed"
 fi
 if [ "$STEP_STATUS" = "unknown" ]; then
     "$BIN_DIR/04-launch-client.sh" "$PROFILE" || STEP_STATUS="launch-client failed"

@@ -62,7 +62,11 @@ hold_profile_lock() {
     mkdir -p "$lock_dir"
     exec 9>"${lock_dir}/.run.lock"
     if ! flock -n 9; then
-        die "another run is already using output/${profile} (its teardown may still be finishing) - wait for it to end"
+        # Queue rather than fail. Runs are usually started back to back, and the thing being
+        # waited on is normally the previous run's teardown - a minute at most. Failing there
+        # just means starting it again by hand.
+        log "waiting for the current run on profile '${profile}' to finish..."
+        flock -w 1800 9 || die "timed out waiting for the run on profile '${profile}' to finish"
     fi
 }
 

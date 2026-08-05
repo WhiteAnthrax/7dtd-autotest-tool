@@ -875,3 +875,69 @@ Two things this cost, both worth avoiding next time:
 - **The scenario failed three steps downstream of the real problem** ("no next-page entry"),
   which reads as a pager bug. It now fails at the point the count is wrong, and says how many
   destinations it actually got.
+
+## Where state lives decides which process you ask - and the answer is not always "the world"
+
+Three scenarios have now been written by asking "where does this live?", and the travel-cost
+one got two different answers in the same script:
+
+- **Entity state** (a companion's owner marker, a spawn, a teleport) lives with the world, so
+  it goes through `world_console` - the server when there is one.
+- **A player's inventory** does not. Giving items to the *server's* copy of a remote player
+  answered `could not fit 21 x casinoCoin in the backpack`; the real inventory belongs to the
+  client. That is also where the mod charges from - `Consumed local travel cost for ...` -
+  so the client is both the right place to put the items and the right place to count them.
+- **Log lines follow the code, not the world.** Counting `Consumed` in the *server's* log
+  found nothing and reported "the consumption never ran", while the inventory had visibly
+  gone from 21 to 14. `client_log_grep_count` reads the client's `Player.log` in either
+  topology, which is also the only way the over/under-removal warnings would ever be seen on
+  a dedicated server.
+
+The general form: "which process owns this?" has to be asked per *piece of state*, not once
+per scenario. Getting it wrong produces a plausible wrong answer rather than an error - which
+is the same shape as every other client/server mix-up in this file.
+
+## `git archive` builds the committed tree - including for the driver mod
+
+`02-build-mods.sh` archives both mods with `git archive`, so a freshly written source file
+that has not been committed is simply not in the build. That cost a debugging session once on
+the mod under test, and then again on SdtdTestPilot: a new `testpilot inventory` command was
+answered by the console with the *old* build's usage line, which reads like a typo in the
+command rather than a missing file.
+
+The build now refuses to run when the source it is about to archive has uncommitted changes,
+listing them, with `ALLOW_DIRTY_BUILD=1` to override on purpose.
+
+## A config the game refuses is a config the test never applied
+
+The travel-cost scenario reported that the mod charged nothing and showed no confirmation -
+in hostload, on both lines, while connect passed. That reads like a single-player bug.
+
+It was the harness. The client's config was rewritten with an inline PowerShell `-Command`,
+and the attribute quotes did not survive `ssh -> powershell -Command`:
+
+```xml
+<TravelCost enabled=true item=casinoCoin perMeter=0.1 minimum=7 />
+```
+
+The mod said so, in the client's own log, the whole time:
+
+```
+[VisitedTraderTeleport] Could not read config, using Personal: 'true' is an unexpected token.
+```
+
+It fell back to its defaults - cost disabled - and the scenario dutifully reported that
+nothing was charged. Connect passed because there the *server's* copy governs, and that one
+was written with `sed`, correctly.
+
+Three things worth keeping:
+
+- **A parse failure is a silent fallback.** Software that "uses defaults on a bad config"
+  turns a broken write into a plausible test result. Anything this harness writes for the
+  game to read is now read back and parsed before the run continues.
+- **The quoting boundary is where to look.** `lib/ssh-omen.sh` already says a script file
+  exists so "quoting and encoding issues never make it across the SSH boundary" - and this
+  was written inline anyway. Anything with quotes in it goes in a `.ps1`.
+- **Topology split the symptom.** Passing in one topology and failing in the other pointed
+  at the mod's two code paths; it was really two *config* paths, only one of which the
+  harness wrote correctly.
