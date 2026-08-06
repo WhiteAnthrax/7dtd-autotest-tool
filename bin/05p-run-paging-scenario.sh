@@ -193,43 +193,50 @@ log "recorded traders: ${TRADER_IDS[*]}"
 # Talk to one the player is actually standing next to - the group A traders are 400m away
 # now, and the client cannot open a dialog with an entity that far off.
 TALKING_TO="${TRADER_IDS[-1]}"
-EXPECTED_TOTAL=$((TRADER_COUNT - 1))
-log "opening the destination list from trader ${TALKING_TO} (expecting ${EXPECTED_TOTAL} destinations)"
+log "opening the destination list from trader ${TALKING_TO}"
 tp_dialog open "$TALKING_TO" >/dev/null
 tp_dialog select "$TRAVEL_RESPONSE_ID" >/dev/null
 
-PAGE1="$(tp_dialog_dump)"
-take_screenshot "01-page-1"
-PAGE1_IDS="$(destination_ids "$PAGE1")"
-# Fail here, with the actual number, rather than three steps later on a missing next-page
-# entry: if the recorded traders collapsed into fewer destinations than expected there is no
-# paging to test and the reason is the keys, not the pager.
-PAGE1_COUNT="$(printf '%s' "$PAGE1_IDS" | jq 'length')"
-if [ "$PAGE1_COUNT" -lt "$DESTINATIONS_PER_PAGE" ]; then
-    die "page 1 shows only ${PAGE1_COUNT} of the expected ${EXPECTED_TOTAL} destinations - the ${TRADER_COUNT} recorded traders did not become ${EXPECTED_TOTAL} distinct destinations. The dialog held: ${PAGE1}"
-fi
-PAGE1_HAS_NEXT=false; has_entry "$PAGE1" "$NEXT_ID" && PAGE1_HAS_NEXT=true
-PAGE1_HAS_PREVIOUS=false; has_entry "$PAGE1" "$PREVIOUS_ID" && PAGE1_HAS_PREVIOUS=true
-NEXT_TEXT="$(entry_text "$PAGE1" "$NEXT_ID")"
-log "page 1: $(printf '%s' "$PAGE1_IDS" | jq 'length') destinations, next=${PAGE1_HAS_NEXT} previous=${PAGE1_HAS_PREVIOUS} (next reads '${NEXT_TEXT}')"
+# Every page is walked, rather than assuming there are exactly two of them. The seven traders
+# this scenario records are the *minimum*: run inside run-release-verification.sh the earlier
+# stages have already recorded their own, and a check written around "six destinations, five
+# then one" failed there for no better reason than the world having more in it. What is
+# actually being tested - full pages, a last page, nothing duplicated or dropped - does not
+# depend on the total.
+PAGES_JSON="[]"
+CONTROLS_JSON="[]"
+NEXT_TEXT=""
+PREVIOUS_TEXT=""
+PAGE_INDEX=0
+MAX_PAGES=12
+while : ; do
+    PAGE_INDEX=$((PAGE_INDEX + 1))
+    [ "$PAGE_INDEX" -le "$MAX_PAGES" ] || die "more than ${MAX_PAGES} pages; something is not advancing"
 
-[ "$PAGE1_HAS_NEXT" = "true" ] || die "no next-page entry on page 1, so nothing to page through: $PAGE1"
+    DUMP="$(tp_dialog_dump)"
+    [ "$PAGE_INDEX" -le 3 ] && take_screenshot "0${PAGE_INDEX}-page-${PAGE_INDEX}"
+    IDS="$(destination_ids "$DUMP")"
+    HAS_NEXT=false; has_entry "$DUMP" "$NEXT_ID" && HAS_NEXT=true
+    HAS_PREVIOUS=false; has_entry "$DUMP" "$PREVIOUS_ID" && HAS_PREVIOUS=true
+    [ -n "$NEXT_TEXT" ] || NEXT_TEXT="$(entry_text "$DUMP" "$NEXT_ID")"
+    [ -n "$PREVIOUS_TEXT" ] || PREVIOUS_TEXT="$(entry_text "$DUMP" "$PREVIOUS_ID")"
+    log "page ${PAGE_INDEX}: $(printf '%s' "$IDS" | jq 'length') destinations, next=${HAS_NEXT} previous=${HAS_PREVIOUS}"
 
-log "selecting the next page"
-tp_dialog select "$NEXT_ID" >/dev/null
-PAGE2="$(tp_dialog_dump)"
-take_screenshot "02-page-2"
-PAGE2_IDS="$(destination_ids "$PAGE2")"
-PAGE2_HAS_NEXT=false; has_entry "$PAGE2" "$NEXT_ID" && PAGE2_HAS_NEXT=true
-PAGE2_HAS_PREVIOUS=false; has_entry "$PAGE2" "$PREVIOUS_ID" && PAGE2_HAS_PREVIOUS=true
-PREVIOUS_TEXT="$(entry_text "$PAGE2" "$PREVIOUS_ID")"
-log "page 2: $(printf '%s' "$PAGE2_IDS" | jq 'length') destinations, next=${PAGE2_HAS_NEXT} previous=${PAGE2_HAS_PREVIOUS} (previous reads '${PREVIOUS_TEXT}')"
+    PAGES_JSON="$(jq -n --argjson acc "$PAGES_JSON" --argjson ids "$IDS" '$acc + [$ids]')"
+    CONTROLS_JSON="$(jq -n --argjson acc "$CONTROLS_JSON" --argjson next "$HAS_NEXT" \
+        --argjson previous "$HAS_PREVIOUS" '$acc + [{has_next: $next, has_previous: $previous}]')"
 
-log "going back to the first page"
-[ "$PAGE2_HAS_PREVIOUS" = "true" ] || die "no previous-page entry on page 2: $PAGE2"
+    [ "$HAS_NEXT" = "true" ] || break
+    tp_dialog select "$NEXT_ID" >/dev/null
+done
+
+[ "$PAGE_INDEX" -ge 2 ] \
+    || die "the whole list fitted on one page ($(printf '%s' "$PAGES_JSON" | jq '[.[]|length]|add') destinations), so there was no paging to test"
+
+log "going back one page"
 tp_dialog select "$PREVIOUS_ID" >/dev/null
 BACK="$(tp_dialog_dump)"
-take_screenshot "03-back-on-page-1"
+take_screenshot "99-back-one-page"
 BACK_IDS="$(destination_ids "$BACK")"
 
 submit_and_check "testpilot dialog close" >/dev/null 2>&1 || true
@@ -248,27 +255,18 @@ jq -n \
     --arg previous_text "$PREVIOUS_TEXT" \
     --arg screenshot_dir "${LOCAL_SHOT_DIR#"$ROOT_DIR/"}" \
     --argjson traders_recorded "$TRADER_COUNT" \
-    --argjson expected_total "$EXPECTED_TOTAL" \
     --argjson per_page "$DESTINATIONS_PER_PAGE" \
-    --argjson page1 "$PAGE1_IDS" \
-    --argjson page2 "$PAGE2_IDS" \
-    --argjson back "$BACK_IDS" \
-    --argjson page1_has_next "$PAGE1_HAS_NEXT" \
-    --argjson page1_has_previous "$PAGE1_HAS_PREVIOUS" \
-    --argjson page2_has_next "$PAGE2_HAS_NEXT" \
-    --argjson page2_has_previous "$PAGE2_HAS_PREVIOUS" \
+    --argjson pages "$PAGES_JSON" \
+    --argjson controls "$CONTROLS_JSON" \
+    --argjson back_one_page "$BACK_IDS" \
     --argjson screenshots "$SHOTS_JSON" \
     '{mode: $mode,
       traders_recorded: $traders_recorded,
-      expected_total: $expected_total,
       per_page: $per_page,
-      pages: {first: $page1, second: $page2, back_to_first: $back},
-      controls: {page1_has_next: $page1_has_next,
-                 page1_has_previous: $page1_has_previous,
-                 page2_has_next: $page2_has_next,
-                 page2_has_previous: $page2_has_previous,
-                 next_text: $next_text,
-                 previous_text: $previous_text},
+      pages: $pages,
+      page_controls: $controls,
+      back_one_page: $back_one_page,
+      labels: {next: $next_text, previous: $previous_text},
       screenshots: $screenshots,
       screenshot_dir: $screenshot_dir}' > "$RESULT_FILE"
 
