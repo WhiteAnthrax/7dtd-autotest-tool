@@ -941,3 +941,48 @@ Three things worth keeping:
 - **Topology split the symptom.** Passing in one topology and failing in the other pointed
   at the mod's two code paths; it was really two *config* paths, only one of which the
   harness wrote correctly.
+
+## "Everything passed" and `ok: false` at the same time
+
+The release gate reported this after a run in which every single stage printed "verification
+passed":
+
+```json
+{"status":"ok","packaged_config":"identical","ok":false,"failed":[]}
+```
+
+`failed` was empty *and* `ok` was false, which cannot both be about the same thing. The
+summary was right and the gate expression was wrong:
+
+```jq
+[.[] | select(.ok | not)] | length == 0 and (. | length) > 0
+```
+
+After the pipe, `.` is the *filtered* list. With nothing failing that list is empty, so
+"length == 0" was true and "more than zero stages ran" was false - asked of the wrong list.
+Written the other way round it says what was meant:
+
+```jq
+(length > 0) and ([.[] | select(.ok | not)] | length == 0)
+```
+
+Worth keeping in general: after a `|` in jq, `.` is whatever the previous stage produced, and
+a second question about "the input" silently becomes a question about the intermediate. The
+tell was the contradiction in the output - a summary that lists no failures next to a verdict
+that says it failed is a bug in the verdict, not in the run.
+
+## A checklist that assumes an empty world breaks when it is not the only test
+
+Paging asserted "six destinations: five on the first page, one on the second", which was true
+when it was the only thing running. Inside the release gate it ran after the dialog, travel,
+companion and distance stages, all of which record traders of their own, and it failed on a
+list that was longer than it expected - while the pager itself was working perfectly.
+
+The scenario now walks every page to the end and checks the properties that hold whatever the
+total is: every page but the last is full, the last is neither empty nor overfull, nothing
+appears twice or goes missing, the controls match the position in the list, and going back
+lands on the page before. Seven recorded traders became the *minimum* rather than the answer.
+
+The general shape: a check that encodes "the world contains exactly what I just put in it"
+only works while the scenario runs alone. Assert the invariant, not the arithmetic of one
+particular fixture.

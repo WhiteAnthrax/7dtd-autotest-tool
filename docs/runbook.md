@@ -290,7 +290,9 @@ so the name alone never proved anything.
 
 It installs the ZIP on the server and client in place of the Debug build and drives it from
 `SdtdTestPilot`, which is a separate mod and therefore works against any build of the mod
-under test. Three things get checked:
+under test. What it renders is checked per language; what it *does* is checked once each,
+after the languages, and every one of those stages is part of the verdict - `ok` is false if
+any of them fails:
 
 - **What it renders**, per language: the travel option is offered, the destination list has
   the expected entries, nothing the mod produced was dropped before it reached the screen,
@@ -304,17 +306,28 @@ under test. Three things get checked:
   records still in the save, and the player alive at the end. Screenshots in
   `output/<profile>/screenshots/travel/`.
 
-- **Who it takes along**, once: a hired companion and a placed turret are put next to the
-  player and marked the way the game marks them (`testpilot mark hired|owned`), and the run
-  asserts the companion moved with the player and the turret did not - issue #21. This only
-  covers the dedicated-server topology, because that is what this script starts. The
-  single-player path is a different branch of the mod (`if (player is EntityPlayerLocal)`)
-  and needs its own run:
+- **Who it takes along**: a hired companion and a placed turret are put next to the player
+  and marked the way the game marks them (`testpilot mark hired|owned`); the companion has to
+  move with the player and the turret has to stay - issue #21.
+- **A real distance**: a trip of 1000m, so the destination has to be prepared rather than
+  being terrain already under the player's feet. This is the only stage that exercises the
+  preparation and transport machinery at all.
+- **More than one page** of destinations, walked to the end and back.
+- **A trip that costs something**: with nothing to pay with it must be refused and take
+  nothing; with enough it must cost exactly the configured amount and ask for confirmation
+  first. This one restarts the world with the cost setting on, and so runs last.
 
-  ```bash
-  ./bin/run-companion-check.sh --profile v3 --mode hostload \
-      --package output/v3/dist/VisitedTraderTeleport-0.7.11.zip
-  ```
+All of that covers the dedicated-server topology only, because that is what this script
+starts. Travel takes a different branch for a local player (`if (player is EntityPlayerLocal)`
+in VisitedTraderTeleportService), so the single-player path needs its own runs before a
+release:
+
+```bash
+for s in companion distance paging cost; do
+    ./bin/run-scenario-check.sh --scenario "$s" --profile v3 --mode hostload \
+        --package output/v3/dist/VisitedTraderTeleport-0.7.11.zip
+done
+```
 
 That travel part is what a screenshot cannot reach: the store, key canonicalization, travel
 readiness and cost logic all moved into `VisitedTraderTeleport.Core` between 0.7.9 and

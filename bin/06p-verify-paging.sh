@@ -26,49 +26,56 @@ VERDICT_FILE="$OUTPUT_DIR/paging-verify.json"
 rm -f "$VERDICT_FILE"
 [ -f "$RESULT_FILE" ] || die "no $RESULT_FILE - run 05p-run-paging-scenario.sh first"
 
-jq '{
+jq '
+  (.pages | length) as $page_count
+| ([.pages[] | length] | add) as $listed
+| ([.pages[][]] | unique | length) as $distinct
+| .per_page as $per_page
+| {
     mode,
-    expected_total,
     per_page,
-    page1_count: (.pages.first | length),
-    page2_count: (.pages.second | length),
-    controls,
+    page_count: $page_count,
+    page_sizes: [.pages[] | length],
+    total_listed: $listed,
+    labels,
 
-    first_page_is_full: ((.pages.first | length) == .per_page),
-    second_page_has_the_rest: ((.pages.second | length) == (.expected_total - .per_page)),
+    # There was more than one page. Without this everything below is vacuously true.
+    paged_at_all: ($page_count >= 2),
 
-    # Every destination appears exactly once across the two pages.
-    no_duplicates_across_pages: (((.pages.first + .pages.second) | unique | length)
-                                 == ((.pages.first + .pages.second) | length)),
-    all_destinations_shown: (((.pages.first + .pages.second) | unique | length) == .expected_total),
+    # Every page but the last is full, and the last is neither empty nor overfull.
+    full_pages_are_full: ([.pages[:-1][] | length] | all(. == $per_page)),
+    last_page_in_range: ((.pages[-1] | length) > 0 and (.pages[-1] | length) <= .per_page),
 
-    # The controls offered match where you are in the list.
-    next_on_first_page: .controls.page1_has_next,
-    no_previous_on_first_page: (.controls.page1_has_previous | not),
-    previous_on_second_page: .controls.page2_has_previous,
-    no_next_on_last_page: (.controls.page2_has_next | not),
+    # Nothing shown twice, which is what an off-by-one in the slice would produce.
+    no_duplicates_across_pages: ($listed == $distinct),
 
-    # Going back is the same page, in the same order, rather than a re-slice from somewhere.
-    back_matches_first_page: (.pages.back_to_first == .pages.first),
+    # The controls match where you are: the first page offers next only, the last offers
+    # previous only, anything between offers both.
+    controls_match_position: ([.page_controls | to_entries[]
+        | .key as $i
+        | (.value.has_next == ($i < ($page_count - 1)))
+          and (.value.has_previous == ($i > 0))] | all),
 
-    # The paging entries are text a player can read, not a raw key that never resolved.
-    paging_labels_localized: ((.controls.next_text | length) > 0
-                              and (.controls.previous_text | length) > 0
-                              and (.controls.next_text | startswith("vtt_") | not)
-                              and (.controls.previous_text | startswith("vtt_") | not)),
+    # Going back one page from the last shows the page before it, in the same order.
+    back_matches_previous_page: (.back_one_page == .pages[-2]),
+
+    # Readable text rather than a key that never resolved.
+    paging_labels_localized: ((.labels.next | length) > 0
+                              and (.labels.previous | length) > 0
+                              and (.labels.next | startswith("vtt_") | not)
+                              and (.labels.previous | startswith("vtt_") | not)),
     screenshots: (.screenshots | length),
     screenshot_dir
-}
-| .ok = (.first_page_is_full and .second_page_has_the_rest and .no_duplicates_across_pages
-         and .all_destinations_shown and .next_on_first_page and .no_previous_on_first_page
-         and .previous_on_second_page and .no_next_on_last_page and .back_matches_first_page
-         and .paging_labels_localized)' "$RESULT_FILE" > "$VERDICT_FILE"
+  }
+| .ok = (.paged_at_all and .full_pages_are_full and .last_page_in_range
+         and .no_duplicates_across_pages and .controls_match_position
+         and .back_matches_previous_page and .paging_labels_localized)' \
+    "$RESULT_FILE" > "$VERDICT_FILE"
 
 jq -r '
     "paging verdict (" + .mode + "):",
-    "  pages:    \(.page1_count) + \(.page2_count) of \(.expected_total) destinations (\(.per_page) per page)",
-    "  controls: next=\(.controls.page1_has_next)/\(.controls.page2_has_next) previous=\(.controls.page1_has_previous)/\(.controls.page2_has_previous)",
-    "  labels:   next=\"\(.controls.next_text)\" previous=\"\(.controls.previous_text)\""' "$VERDICT_FILE"
+    "  pages:    \(.page_sizes | map(tostring) | join(" + ")) = \(.total_listed) destinations over \(.page_count) pages (\(.per_page) per page)",
+    "  labels:   next=\"\(.labels.next)\" previous=\"\(.labels.previous)\""' "$VERDICT_FILE"
 
 if [ "$(jq -r '.ok' "$VERDICT_FILE")" != "true" ]; then
     jq -r 'to_entries[] | select(.value == false) | "  FAILED: \(.key)"' "$VERDICT_FILE"

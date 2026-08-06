@@ -29,6 +29,8 @@ source "$ROOT_DIR/lib/ssh-omen.sh"
 source "$ROOT_DIR/lib/testpilot-queue.sh"
 # shellcheck source=lib/client-control.sh
 source "$ROOT_DIR/lib/client-control.sh"
+# shellcheck source=lib/docker-server.sh
+source "$ROOT_DIR/lib/docker-server.sh"
 
 ALL_LANGUAGES="english,german,spanish,french,italian,japanese,koreana,polish,brazilian,russian,turkish,schinese,tchinese"
 
@@ -100,8 +102,14 @@ hold_dedicated_server_lock
 OUTPUT_DIR="$ROOT_DIR/output/$PROFILE"
 mkdir -p "$OUTPUT_DIR"
 RESULT_FILE="$OUTPUT_DIR/release-verification-result.json"
+# Every verdict this run will write, dropped first: a run that dies half way through must not
+# be able to present the previous run's answer for the stage it never reached.
 rm -f "$RESULT_FILE" "$OUTPUT_DIR"/release-dialog-*.json "$OUTPUT_DIR"/release-verify-*.json \
-    "$OUTPUT_DIR/companion-result.json" "$OUTPUT_DIR/companion-verify.json"
+    "$OUTPUT_DIR/release-travel-result.json" "$OUTPUT_DIR/release-travel-verify.json" \
+    "$OUTPUT_DIR/companion-result.json" "$OUTPUT_DIR/companion-verify.json" \
+    "$OUTPUT_DIR/distance-travel-result.json" "$OUTPUT_DIR/distance-travel-verify.json" \
+    "$OUTPUT_DIR/paging-result.json" "$OUTPUT_DIR/paging-verify.json" \
+    "$OUTPUT_DIR/travel-cost-result.json" "$OUTPUT_DIR/travel-cost-verify.json"
 rm -rf "$OUTPUT_DIR/screenshots"
 
 cleanup() {
@@ -152,8 +160,6 @@ RESULTS_JSON="[]"
 if [ "$STEP_STATUS" = "unknown" ]; then
     STEP_STATUS="ok"
     FIRST=1
-    TRAVEL_DONE=0
-    COMPANIONS_DONE=0
     for lang in "${LANGUAGES[@]}"; do
         log "=== language: ${lang} ==="
         [ "$FIRST" = "1" ] || stop_client
@@ -169,36 +175,6 @@ if [ "$STEP_STATUS" = "unknown" ]; then
         fi
         if [ "$LANG_STATUS" = "ok" ] && ! "$BIN_DIR/06r-verify-release.sh" "$PROFILE"; then
             LANG_STATUS="verify failed"
-        fi
-
-        # Travel runs once, on the first language. It checks behaviour rather than text, so
-        # repeating it per language would only re-prove the same thing - and every extra run
-        # is another trip the player has to survive.
-        if [ "$LANG_STATUS" = "ok" ] && [ "$TRAVEL_DONE" = "0" ]; then
-            if "$BIN_DIR/05t-run-release-travel-scenario.sh" "$PROFILE" \
-                && "$BIN_DIR/06t-verify-release-travel.sh" "$PROFILE"; then
-                TRAVEL_DONE=1
-            else
-                LANG_STATUS="release travel verification failed"
-            fi
-        fi
-
-        # Who travel takes along, also once. This is the only stage that covers issue #21
-        # (a placed turret being dragged to the trader), and leaving it out of the release
-        # gate would mean shipping on a companion check somebody remembers running against
-        # some build. It runs after travel because it needs the same live client and world,
-        # and it is language-independent for the same reason travel is.
-        #
-        # Only the dedicated-server topology is covered here, because that is what this
-        # script starts. The single-player path is a different branch of the mod and has to
-        # be run separately: bin/run-companion-check.sh --mode hostload --package <zip>.
-        if [ "$LANG_STATUS" = "ok" ] && [ "$COMPANIONS_DONE" = "0" ]; then
-            if "$BIN_DIR/05c-run-companion-scenario.sh" "$PROFILE" \
-                && "$BIN_DIR/06c-verify-companions.sh" "$PROFILE"; then
-                COMPANIONS_DONE=1
-            else
-                LANG_STATUS="companion verification failed"
-            fi
         fi
 
         [ -f "$OUTPUT_DIR/release-dialog-result.json" ] && cp "$OUTPUT_DIR/release-dialog-result.json" "$OUTPUT_DIR/release-dialog-${lang}.json"
@@ -223,9 +199,77 @@ if [ "$STEP_STATUS" = "unknown" ]; then
     done
 fi
 
+# --- what it does, rather than what it renders ----------------------------------------
+#
+# These run once each, after the languages, rather than on the first language. They check
+# behaviour, so repeating them per language would only re-prove the same thing - and two of
+# them change the world in ways the rendering checks would notice: paging records seven
+# destinations and distance leaves a trader a kilometre away, either of which would change
+# what the next language's dialog shows.
+#
+# All of them are part of the gate. A release that only proves the dialog renders is how the
+# companion bug (#21) reached users in the first place.
+#
+# Only the dedicated-server topology is covered here, because that is what this script
+# starts. The single-player path is a different branch of the mod and needs its own runs:
+#   ./bin/run-scenario-check.sh --scenario <name> --profile <p> --mode hostload --package <zip>
+BEHAVIOUR_JSON="{}"
+run_behaviour_stage() {
+    local name="$1" scenario="$2" verify="$3" verdict_file="$4" verdict="null" status="ok"
+
+    if [ "$STEP_STATUS" != "ok" ]; then
+        return
+    fi
+
+    log "=== ${name} ==="
+    if ! "$BIN_DIR/$scenario" "$PROFILE"; then
+        status="scenario failed"
+    elif ! "$BIN_DIR/$verify" "$PROFILE"; then
+        status="verification failed"
+    fi
+    [ -f "$OUTPUT_DIR/$verdict_file" ] && verdict="$(cat "$OUTPUT_DIR/$verdict_file")"
+    BEHAVIOUR_JSON="$(jq -n --argjson acc "$BEHAVIOUR_JSON" --arg name "$name" \
+        --arg status "$status" --argjson verdict "$verdict" \
+        '$acc + {($name): {status: $status, ok: ($status == "ok" and ($verdict.ok // false)), verdict: $verdict}}')"
+    if [ "$status" != "ok" ]; then
+        log "${name} FAILED: ${status}"
+        STEP_STATUS="${name} ${status}"
+    fi
+}
+
+run_behaviour_stage travel 05t-run-release-travel-scenario.sh 06t-verify-release-travel.sh release-travel-verify.json
+run_behaviour_stage companions 05c-run-companion-scenario.sh 06c-verify-companions.sh companion-verify.json
+run_behaviour_stage distance 05d-run-distance-travel-scenario.sh 06d-verify-distance-travel.sh distance-travel-verify.json
+run_behaviour_stage paging 05p-run-paging-scenario.sh 06p-verify-paging.sh paging-verify.json
+
+# Travel cost last, and on a restarted world: the mod reads its config when the world loads
+# and has no reload, so the setting has to be in place before the client (and the server, when
+# there is one) start. Leaving it enabled for the earlier stages would change them - a paid
+# trip asks for confirmation, and a player with nothing to pay with does not travel at all.
+if [ "$STEP_STATUS" = "ok" ]; then
+    log "=== travel cost (restarting with the cost setting on) ==="
+    stop_client
+    if ! "$BIN_DIR/03c-configure-travel-cost.sh" "$PROFILE"; then
+        STEP_STATUS="travel cost configuration failed"
+    elif ! docker_server_restart || ! docker_server_wait_started 480; then
+        STEP_STATUS="server restart for the travel cost stage failed"
+    elif ! "$BIN_DIR/04-launch-client.sh" "$PROFILE"; then
+        STEP_STATUS="relaunch for the travel cost stage failed"
+    else
+        make_world_safe
+    fi
+    run_behaviour_stage cost 05x-run-travel-cost-scenario.sh 06x-verify-travel-cost.sh travel-cost-verify.json
+fi
+
+# Every stage ran and every stage passed. Written with the "did any stage run" test first,
+# because the obvious phrasing - filter to the failures, then ask for the length twice - asks
+# the second question of the *filtered* list: with nothing failing that list is empty, so
+# "more than zero stages" was false and a run where everything passed reported ok:false.
+BEHAVIOUR_OK="$(printf '%s' "$BEHAVIOUR_JSON" \
+    | jq '(length > 0) and ([.[] | select(.ok | not)] | length == 0)' 2>/dev/null || printf 'false')"
+
 RUN_OK=false
-if [ "$STEP_STATUS" = "ok" ] && [ "$CONFIG_MATCH" = "identical" ] && [ "${TRAVEL_DONE:-0}" = "1" ] && \
-   [ "${COMPANIONS_DONE:-0}" = "1" ] && \
+if [ "$STEP_STATUS" = "ok" ] && [ "$CONFIG_MATCH" = "identical" ] && [ "$BEHAVIOUR_OK" = "true" ] && \
    [ "$(printf '%s' "$RESULTS_JSON" | jq '[.[] | select(.ok | not)] | length')" = "0" ] && \
    [ "$(printf '%s' "$RESULTS_JSON" | jq 'length')" != "0" ]; then
     RUN_OK=true
@@ -254,12 +298,13 @@ fi
 jq -n --arg profile "$PROFILE" --arg package "$(basename "$PACKAGE")" --arg status "$STEP_STATUS" \
     --arg sha256 "$PACKAGE_SHA" --argjson provenance "$PROVENANCE" \
     --arg config_match "$CONFIG_MATCH" --argjson languages "$RESULTS_JSON" --argjson ok "$RUN_OK" \
-    --argjson travel "$( [ "${TRAVEL_DONE:-0}" = "1" ] && cat "$OUTPUT_DIR/release-travel-verify.json" || echo null )" \
-    --argjson companions "$( [ "${COMPANIONS_DONE:-0}" = "1" ] && cat "$OUTPUT_DIR/companion-verify.json" || echo null )" \
+    --argjson behaviour "$BEHAVIOUR_JSON" \
     '{profile: $profile, package: $package, sha256: $sha256, built_from: $provenance,
       status: $status, packaged_config: $config_match,
-      ok: $ok, travel: $travel, companions: $companions, languages: $languages}' > "$RESULT_FILE"
+      ok: $ok, behaviour: $behaviour, languages: $languages}' > "$RESULT_FILE"
 
-echo "RELEASE_VERIFICATION_RESULT $(jq -c '{profile, package, sha256, built_from, status, packaged_config, ok, failed: [.languages[] | select(.ok | not) | .language]}' "$RESULT_FILE")"
+echo "RELEASE_VERIFICATION_RESULT $(jq -c '{profile, package, sha256, built_from, status, packaged_config, ok,
+        failed: ([.languages[] | select(.ok | not) | .language]
+                 + [.behaviour | to_entries[] | select(.value.ok | not) | .key])}' "$RESULT_FILE")"
 
 [ "$RUN_OK" = "true" ]
