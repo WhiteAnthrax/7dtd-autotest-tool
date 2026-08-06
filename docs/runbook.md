@@ -465,50 +465,69 @@ curl -sS "${H[@]}" https://api.nexusmods.com/v3/mod-files/<file id>/versions | j
 
 ### Publishing
 
-```bash
-# 3.x line
-./bin/publish-to-nexus.sh --profile v3 \
-    --package dist/VisitedTraderTeleport-0.7.11.zip --version 0.7.11 \
-    --file-id 7599716 --mod-id 4548370376889 \
-    --display-name "Travel Between Visited Traders 0.7.11 (for V3.1)" \
-    --changelog ../VisitedTraderTeleport/docs/NexusModsChangelog-0.7.11.txt \
-    --update-mod-version
+One command per line. It does the whole thing: builds the package from the branch tip, runs
+the release gate against it, creates the GitHub release, uploads to Nexus as a new version of
+the existing file, and reads the page back to check it came out clean.
 
-# v2.6 line
-./bin/publish-to-nexus.sh --profile v26 \
-    --package dist/VisitedTraderTeleport-0.6.23.zip --version 0.6.23 \
-    --file-id 7403906 --mod-id 4548370376889 --category optional \
-    --display-name "Travel Between Visited Traders 0.6.23 (for V2.6)" \
-    --changelog ../VisitedTraderTeleport/docs/NexusModsChangelog-0.6.23.txt
+```bash
+./bin/release.sh --line v3 --dry-run   # rehearse: preflight + what would be published
+./bin/release.sh --line v3             # 3.x line, from main
+./bin/release.sh --line v26            # v2.6 line, from v26-work
 ```
 
-`--dry-run` prints everything it would send and stops; `--yes` skips the confirmation.
-Watch for `NEXUS_PUBLISH_RESULT {...}`.
+Everything that used to be typed by hand now comes from `config/release-lines.conf` or from
+the mod repo at the commit being released:
 
-Three things match how the page is already set up, and the defaults do **not**:
+| | where it comes from |
+|---|---|
+| version, tag | `mod/VisitedTraderTeleport/ModInfo.xml` at that commit |
+| release notes | that version's section of `CHANGELOG.md`, plus the line's header |
+| "use the other release instead" | the *other* branch's ModInfo.xml, so it is never stale |
+| Nexus changelog | `docs/NexusModsChangelog-<version>.txt` at that commit |
+| file id, category, display name | `config/release-lines.conf` |
 
-- **`--category optional` on the v2.6 line.** That file is `optional` on Nexus; the default
-  is `main`, which would silently re-categorise it.
-- **`--update-mod-version` only on the 3.x line.** The page's headline version should track
-  the current line; setting it while publishing a v2.6 build makes the mod look outdated.
-- **`--display-name` follows the existing "(for V3.1)" / "(for V2.6)" naming.** Without it
-  the file is named after the ZIP, which loses the game-version marker readers rely on.
+Preflight runs before anything is built, because finding out that a changelog is missing after
+a twenty-minute verification is a waste of an evening: the branch has to match origin, `gh`
+has to be logged in, the API key has to be readable, both changelog forms have to exist, and
+the tag must not already be released.
 
-**It refuses to upload unless `run-release-verification.sh` passed against this exact ZIP.**
-That is the reason it lives here rather than in the mod repo: publishing before verifying is
-how a release once went out with only its Debug twin ever having been run. The check matches
-on the package *filename* and `ok: true` together, so rebuilding the ZIP without re-verifying
-does not sneak through.
+`--dry-run` keeps an existing package rather than rebuilding (two builds of one commit are not
+byte-identical, and replacing the verified ZIP with an unverified twin is exactly the trap
+this pipeline already fell into once) and skips the gate.
 
-The file id and mod id come from the Nexus page (the mod id is in its URL). The API key is
-read from `NEXUS_API_KEY` or `~/.config/nexus-upload.env` (mode 600) - see
-`config/nexus-upload.env.example`. Never pass it as an argument.
+`--skip-verify` publishes without re-running the gate, and only works when a passing
+verification exists **for those exact bytes** - the check is on the sha256, not the filename.
 
-If the changelog file's first line is just the version number, it is dropped: Nexus already
-shows the version separately.
+Afterwards it runs:
 
-What this does **not** do, because the Upload API does not expose it: create a new mod page,
-edit the Full description, or change tags. Those stay manual.
+```bash
+./bin/check-nexus-page.sh --mod-id 4548370376889
+```
+
+which reads every file on the page and complains if two versions of one file are current, if
+the newest version is retired while an older one is not, or if two *files* are current in the
+same category. That last one is not hypothetical: 0.6.22 had been uploaded as its own file
+rather than as a version of 7403906, so publishing 0.6.23 correctly still left the page
+showing both, and it had to be archived by hand. Uploading through this pipeline keeps every
+build on the same file id, where Nexus retires the previous version by itself.
+
+The Upload API cannot archive a *different* file, so when that check does complain the fix is
+a click: the mod's edit page, Files step, the file's ⋮ menu, Archive.
+
+What this still does **not** do, because the Upload API does not expose it: create a mod page,
+edit the Full description, or change tags.
+
+### The ids, and doing it by hand
+
+`config/release-lines.conf` holds them, and they are public. To re-derive them, or to publish
+a single step by hand, the underlying scripts still work on their own:
+
+```bash
+./bin/build-release-package.sh --profile v3 --ref main
+./bin/run-release-verification.sh --profile v3 --package output/v3/dist/VisitedTraderTeleport-0.7.11.zip --fresh-save
+./bin/publish-to-nexus.sh --profile v3 --package ... --version 0.7.11 --file-id 7599716 \
+    --mod-id 4548370376889 --display-name "..." --changelog ... --update-mod-version
+```
 
 ## Troubleshooting
 

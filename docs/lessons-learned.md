@@ -986,3 +986,33 @@ lands on the page before. Seven recorded traders became the *minimum* rather tha
 The general shape: a check that encodes "the world contains exactly what I just put in it"
 only works while the scenario runs alone. Assert the invariant, not the arithmetic of one
 particular fixture.
+
+## A release that is "one command" except for the parts that are not
+
+The August 2026 release was published with scripts, and still took a dozen hand-typed steps:
+two file ids and a category read out of the runbook, a changelog extracted from the other
+branch with `git show`, release notes pasted together from the CHANGELOG, a sentence naming
+the other line's current version typed from memory, and afterwards a browser to archive a file
+the upload had left in the wrong section.
+
+Each of those is a place to be wrong, and one of them was: the "use the 0.6.22 release
+instead" line in a release note is only right until the other line moves.
+
+`bin/release.sh` now takes a line name and does the rest, reading everything else from the
+commit being released. The rule it encodes: **anything a human would look up is something the
+tool can look up.** The ids live in a committed config; the version comes from ModInfo.xml;
+the notes come from CHANGELOG.md; the cross-reference comes from the other branch.
+
+Two smaller things fell out of writing it:
+
+- **Preflight before the expensive part.** Missing changelog, unauthenticated `gh`, a branch
+  behind origin, a tag already released - all cheap to check, all discovered after a
+  twenty-minute verification if you do not.
+- **A rehearsal must not damage the thing it rehearses.** `--dry-run` originally rebuilt the
+  package, and two builds of one commit are not byte-identical, so it replaced a verified ZIP
+  with an unverified twin of the same name. It now keeps what is there.
+
+And one thing the tool cannot do: the Upload API archives the previous version of the file it
+uploads to, and nothing else. A file uploaded separately years ago stays where it is.
+`bin/check-nexus-page.sh` runs after every publish and says so in words, because the page
+looked correct from the API's own "did the upload work" answer while being wrong on screen.
