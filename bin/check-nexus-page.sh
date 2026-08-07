@@ -3,10 +3,10 @@
 # page should.
 #
 # The August 2026 release published correctly and still left the page wrong: the previous
-# v2.6 build stayed in Optional files next to the new one, because it had been uploaded as a
-# separate file entry rather than as a version of the same file, and Nexus only moves the
-# previous version of the *same* file out of the way. Nobody noticed until the page was
-# looked at by eye.
+# v2.6 build stayed in Optional files next to the new one. Nexus retires the previous *main*
+# version by itself - main is exclusive - but an optional file keeps every current version
+# listed, so 0.6.22 and 0.6.23 sat side by side until one was set to Old by hand. Nobody
+# noticed until the page was looked at by eye.
 #
 # What it checks, per file on the page:
 #   - exactly one version is current (anything not old_version / archived counts as current)
@@ -14,9 +14,11 @@
 # and across the page:
 #   - no two files claim the same category, which is the shape of the problem above
 #
-# It cannot fix anything: the Upload API archives the previous version of the file being
-# uploaded (publish-to-nexus.sh --archive-existing) and offers nothing for a different file.
-# Tidying that up is a click on the site, so this points at it rather than pretending.
+# It cannot fix anything. There is no endpoint for changing a version's category:
+# /mod-file-versions/{id} is read-only, and the only handles the Upload API offers are
+# archive_existing_file and previous_version_id, both decided when the new version is created
+# (publish-to-nexus.sh passes the latter). Tidying up after the fact is a click on the site,
+# so this points at it rather than pretending otherwise.
 #
 # Usage: check-nexus-page.sh --mod-id <id> [--quiet]
 set -uo pipefail
@@ -87,7 +89,7 @@ for file_id in $FILE_IDS; do
     SUMMARY="${SUMMARY}  file ${file_id}: newest ${NEWEST} [${NEWEST_CATEGORY}], current: ${CURRENT_LIST:-none}"$'\n'
 
     if [ "$CURRENT_COUNT" -gt 1 ]; then
-        SUMMARY="${SUMMARY}    -> ${CURRENT_COUNT} versions of this file are still listed as current"$'\n'
+        SUMMARY="${SUMMARY}    -> ${CURRENT_COUNT} versions of this file are still listed as current; the older ones belong on Old version"$'\n'
         PROBLEMS=$((PROBLEMS + 1))
     fi
     if [ "$CURRENT_COUNT" -ge 1 ] && printf '%s' "$NEWEST_CATEGORY" | grep -qE "old_version|archived"; then
@@ -107,7 +109,7 @@ if [ -n "$DUPLICATE_CATEGORIES" ]; then
         [ -n "$category" ] || continue
         IDS="$(printf '%s' "$CURRENT_CATEGORIES" | grep "^${category}|" | cut -d'|' -f2 | tr '\n' ' ')"
         SUMMARY="${SUMMARY}  -> more than one file is current in category '${category}': ${IDS}"$'\n'
-        SUMMARY="${SUMMARY}     the older one probably belongs in Old files (Files step -> the file's menu -> Archive)"$'\n'
+        SUMMARY="${SUMMARY}     set the older one to Old version (mod edit page -> Files -> the file's menu)"$'\n'
         PROBLEMS=$((PROBLEMS + 1))
     done <<< "$DUPLICATE_CATEGORIES"
 fi
