@@ -1012,7 +1012,22 @@ Two smaller things fell out of writing it:
   package, and two builds of one commit are not byte-identical, so it replaced a verified ZIP
   with an unverified twin of the same name. It now keeps what is there.
 
-And one thing the tool cannot do: the Upload API archives the previous version of the file it
-uploads to, and nothing else. A file uploaded separately years ago stays where it is.
-`bin/check-nexus-page.sh` runs after every publish and says so in words, because the page
-looked correct from the API's own "did the upload work" answer while being wrong on screen.
+And the thing that started it, which took two attempts to diagnose correctly. The first
+reading was "0.6.22 was uploaded as its own file rather than as a version of 7403906" - the
+mod's edit page lists it as its own row, which looked like proof. The API says otherwise:
+0.6.22 was always a version of 7403906, and it stayed listed as `optional` after 0.6.23 was
+added.
+
+The actual rule is that **`main` is exclusive and `optional` is not**. Nexus retires the
+previous main version by itself because there can only be one; an optional file keeps every
+current version on the page. So the 3.x line looked after itself and the v2.6 line did not,
+and the difference was never about how the files had been uploaded.
+
+There is no endpoint for changing a version's category afterwards - `/mod-file-versions/{id}`
+is read-only. The only handle is at creation time: `previous_version_id`, "the version this
+one replaces", which `bin/publish-to-nexus.sh` now fills in by looking up the file's current
+version. Whether Nexus then retires it is something the next release will show, which is why
+`bin/check-nexus-page.sh` runs afterwards and says plainly what the page looks like.
+
+Worth keeping: **the editing UI is not the data model.** A row in the file list looked like a
+separate file and was not, and a diagnosis built on that would have "fixed" the wrong thing.

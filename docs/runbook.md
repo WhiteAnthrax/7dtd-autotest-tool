@@ -506,13 +506,17 @@ Afterwards it runs:
 
 which reads every file on the page and complains if two versions of one file are current, if
 the newest version is retired while an older one is not, or if two *files* are current in the
-same category. That last one is not hypothetical: 0.6.22 had been uploaded as its own file
-rather than as a version of 7403906, so publishing 0.6.23 correctly still left the page
-showing both, and it had to be archived by hand. Uploading through this pipeline keeps every
-build on the same file id, where Nexus retires the previous version by itself.
+same category.
 
-The Upload API cannot archive a *different* file, so when that check does complain the fix is
-a click: the mod's edit page, Files step, the file's ⋮ menu, Archive.
+The first of those is not hypothetical. **`main` is exclusive; `optional` is not.** Nexus
+retires the previous main version by itself, so the 3.x file looks after itself - but the
+v2.6 file kept 0.6.22 listed as current next to 0.6.23, and it had to be set to Old by hand.
+`bin/publish-to-nexus.sh` now sends `previous_version_id` (the version the new one replaces,
+looked up automatically; `--no-supersede` turns it off), which is the only handle the API
+offers: there is no endpoint for changing a version's category afterwards.
+
+When the check does complain, the fix is on the site: the mod's edit page, Files step, the
+file's ⋮ menu, and set the older version to Old version.
 
 What this still does **not** do, because the Upload API does not expose it: create a mod page,
 edit the Full description, or change tags.

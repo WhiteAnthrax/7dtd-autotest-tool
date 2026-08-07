@@ -22,7 +22,8 @@
 #   5. creates the GitHub release, notes assembled from the repo's own CHANGELOG
 #   6. uploads to Nexus (bin/publish-to-nexus.sh) as a new version of the existing file
 #   7. reads the page back and reports every file's state, failing if anything is left
-#      looking like two current versions
+#      looking like two current versions - which an optional file will do unless Nexus is
+#      told which version the new one replaces
 #
 # Nothing here holds a credential: gh uses its own login, the Nexus key comes from
 # ~/.config/nexus-upload.env.

@@ -53,6 +53,8 @@ Refuses to upload unless run-release-verification.sh passed against this exact Z
   --display-name <name>   File name shown on Nexus. Default: the ZIP's basename.
   --category <c>          main (default), optional, or miscellaneous.
   --archive-existing      Archive the file's current version.
+  --previous-version-id   The version this one replaces. Found automatically by default.
+  --no-supersede          Do not tell Nexus which version this one replaces.
   --update-mod-version    Also set the mod page's version to --version.
   --dry-run               Print what would be sent and stop before the first upload call.
   --yes                   Skip the confirmation prompt.
@@ -65,6 +67,7 @@ EOF
 
 PROFILE=""; PACKAGE=""; VERSION=""; FILE_ID=""; MOD_ID=""; CHANGELOG_FILE=""
 DISPLAY_NAME=""; CATEGORY="main"; ARCHIVE_EXISTING=false; UPDATE_MOD_VERSION=false
+SUPERSEDE=1; PREVIOUS_VERSION_ID=""
 DRY_RUN=0; ASSUME_YES=0
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -77,6 +80,8 @@ while [ $# -gt 0 ]; do
         --display-name) DISPLAY_NAME="${2:-}"; shift 2 ;;
         --category) CATEGORY="${2:-}"; shift 2 ;;
         --archive-existing) ARCHIVE_EXISTING=true; shift ;;
+        --previous-version-id) PREVIOUS_VERSION_ID="${2:-}"; SUPERSEDE=1; shift 2 ;;
+        --no-supersede) SUPERSEDE=0; shift ;;
         --update-mod-version) UPDATE_MOD_VERSION=true; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
         --yes) ASSUME_YES=1; shift ;;
@@ -159,6 +164,7 @@ About to upload to Nexus Mods:
   mod id           ${MOD_ID:-<none>}
   category         $CATEGORY
   archive existing $ARCHIVE_EXISTING
+  supersede        $([ "$SUPERSEDE" = "1" ] && echo "yes${PREVIOUS_VERSION_ID:+ (${PREVIOUS_VERSION_ID})}" || echo "no")
   set mod version  $UPDATE_MOD_VERSION
   changelog        ${CHANGELOG_FILE:-<none>}
   api base         $API_BASE
@@ -276,13 +282,35 @@ for attempt in $(seq 1 60); do
 done
 [ "$STATE" = "available" ] || die "upload ${UPLOAD_ID} never became available (last state: ${STATE})"
 
+# Which version this one replaces. Nexus retires the previous *main* version by itself -
+# main is exclusive, so it can work out what is being replaced - but an optional file keeps
+# every current version listed, which is how 0.6.22 stayed on the page next to 0.6.23 and had
+# to be set to Old by hand. There is no endpoint for changing a version's category
+# (/mod-file-versions/{id} is read-only), so saying up front what this replaces is the only
+# handle the API offers.
+if [ "$SUPERSEDE" = "1" ] && [ -z "$PREVIOUS_VERSION_ID" ]; then
+    EXISTING_JSON="$(nexus_api GET "/mod-files/${FILE_ID}/versions" || true)"
+    PREVIOUS_VERSION_ID="$(printf '%s' "$EXISTING_JSON" \
+        | jq -r '[.data.versions[]? | select((.category // "") | test("old_version|archived") | not)]
+                 | first | .id // empty' 2>/dev/null || true)"
+    if [ -n "$PREVIOUS_VERSION_ID" ]; then
+        PREVIOUS_VERSION="$(printf '%s' "$EXISTING_JSON" | jq -r --arg id "$PREVIOUS_VERSION_ID" \
+            '[.data.versions[]? | select(.id == $id) | .version] | first // "?"')"
+        log "this version replaces ${PREVIOUS_VERSION} (${PREVIOUS_VERSION_ID})"
+    else
+        log "no current version on this file to replace"
+    fi
+fi
+
 log "step 6/7: creating the file version"
 VERSION_BODY="$(jq -n \
     --arg upload_id "$UPLOAD_ID" --arg name "$DISPLAY_NAME" --arg version "$VERSION" \
     --arg category "$CATEGORY" --argjson archive "$ARCHIVE_EXISTING" \
     --argjson update_mod_version "$UPDATE_MOD_VERSION" \
+    --arg previous_version_id "$PREVIOUS_VERSION_ID" \
     '{upload_id: $upload_id, name: $name, version: $version, file_category: $category,
-      archive_existing_file: $archive, update_mod_version: $update_mod_version}')"
+      archive_existing_file: $archive, update_mod_version: $update_mod_version}
+     + (if $previous_version_id == "" then {} else {previous_version_id: $previous_version_id} end)')"
 VERSION_JSON="$(check_response "$(nexus_api POST "/mod-files/${FILE_ID}/versions" "$VERSION_BODY")" "creating the file version")"
 VERSION_ID="$(printf '%s' "$VERSION_JSON" | jq -r '.data.version.id // "?"')"
 log "file version created: ${VERSION_ID}"
