@@ -19,7 +19,7 @@
 # for a remote one - `if (player is EntityPlayerLocal)` in VisitedTraderTeleportService - and
 # a run against the dedicated server leaves the single-player path untested, and vice versa.
 #
-# Usage: run-scenario-check.sh --scenario <companion|distance|paging|cost> --profile <v3|v26>
+# Usage: run-scenario-check.sh --scenario <companion|distance|paging|forget|cost> --profile <v3|v26>
 #                              [--mode connect|hostload] [--package <zip>]
 #                              [--keep-save] [--persistent-save]
 set -uo pipefail
@@ -31,7 +31,7 @@ source "$ROOT_DIR/lib/common.sh"
 
 usage() {
     cat <<EOF
-Usage: $0 --scenario <companion|distance|paging|cost> --profile <v3|v26> [--mode connect|hostload]
+Usage: $0 --scenario <companion|distance|paging|forget|cost> --profile <v3|v26> [--mode connect|hostload]
             [--package <zip>] [--keep-save] [--persistent-save]
 
   --scenario <name>    Which scenario to run:
@@ -43,6 +43,9 @@ Usage: $0 --scenario <companion|distance|paging|cost> --profile <v3|v26> [--mode
                                      how far (default 1000).
                          paging    - records seven traders so the destination list needs two
                                      pages, and walks them.
+                         forget    - removes a destination through the dialog and checks it
+                                     stays gone, that the others survive, and that visiting
+                                     the trader again brings it back.
                          cost      - switches the travel cost on and checks that a trip is
                                      refused with nothing to pay with, and costs exactly the
                                      configured amount with. COST_ITEM / COST_PER_METER /
@@ -89,12 +92,14 @@ case "$SCENARIO" in
                RESULT_PREFIX="distance-travel"; MARKER="DISTANCE_CHECK_RESULT" ;;
     paging)    SCENARIO_STAGE="05p-run-paging-scenario.sh"; VERIFY_STAGE="06p-verify-paging.sh"
                RESULT_PREFIX="paging"; MARKER="PAGING_CHECK_RESULT" ;;
+    forget)    SCENARIO_STAGE="05f-run-forget-scenario.sh"; VERIFY_STAGE="06f-verify-forget.sh"
+               RESULT_PREFIX="forget"; MARKER="FORGET_CHECK_RESULT" ;;
     cost)      SCENARIO_STAGE="05x-run-travel-cost-scenario.sh"; VERIFY_STAGE="06x-verify-travel-cost.sh"
                RESULT_PREFIX="travel-cost"; MARKER="COST_CHECK_RESULT"
                # The mod reads its config when the world loads, so the setting has to be in
                # place before the client starts - not when the scenario runs.
                PREPARE_STAGE="03c-configure-travel-cost.sh" ;;
-    *) usage; die "--scenario must be companion, distance, paging or cost (got '${SCENARIO:-}')" ;;
+    *) usage; die "--scenario must be companion, distance, paging, forget or cost (got '${SCENARIO:-}')" ;;
 esac
 
 if [ "$KEEP_SAVE" = "1" ] && [ "$FRESH_SAVE" = "0" ]; then

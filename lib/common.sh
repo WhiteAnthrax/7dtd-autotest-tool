@@ -105,13 +105,34 @@ require_var() {
     fi
 }
 
+# Settings a caller may override from the environment for one run, rather than by editing the
+# profile. Sourcing the profile would otherwise silently win: `VTT_BRANCH=my-feature ./run...`
+# looked like it was testing a branch and was testing whatever the profile said, which cost a
+# full run and very nearly a wrong conclusion about the code under test.
+PROFILE_OVERRIDABLE_VARS="VTT_BRANCH CLIENT_LANGUAGE"
+
 load_profile() {
     local profile="$1"
     local config_dir
     config_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/config"
     local env_file="$config_dir/${profile}.env"
     [ -f "$env_file" ] || die "no such profile: $profile (expected $env_file)"
+
+    local var saved_names=() saved_values=()
+    for var in $PROFILE_OVERRIDABLE_VARS; do
+        if [ -n "${!var-}" ]; then
+            saved_names+=("$var")
+            saved_values+=("${!var}")
+        fi
+    done
+
     # shellcheck disable=SC1090
     source "$env_file"
     log "loaded profile '$profile' from $env_file"
+
+    local i
+    for i in "${!saved_names[@]}"; do
+        printf -v "${saved_names[$i]}" '%s' "${saved_values[$i]}"
+        log "  ${saved_names[$i]}=${saved_values[$i]} (from the environment, overriding the profile)"
+    done
 }
