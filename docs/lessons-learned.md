@@ -1031,3 +1031,29 @@ version. Whether Nexus then retires it is something the next release will show, 
 
 Worth keeping: **the editing UI is not the data model.** A row in the file list looked like a
 separate file and was not, and a diagnosis built on that would have "fixed" the wrong thing.
+
+## An environment variable the config quietly overwrote
+
+A scenario was launched to test a feature branch:
+
+```bash
+VTT_BRANCH=feature/58-forget-destination ./bin/run-scenario-check.sh --scenario forget --profile v3
+```
+
+It built `main`. `load_profile` sources `config/v3.env`, which sets `VTT_BRANCH=main`, and
+sourcing happens after the environment is set - so the profile won, silently. The run then
+reported that the new dialog screen never appeared, which is exactly what "the feature does
+not work" looks like.
+
+The first instinct was to go and read the mod code again. What actually settled it was that
+the failure was too complete: the screen did not appear *at all*, not even wrongly. Code that
+is written and compiled usually fails partially; code that is absent fails totally.
+
+`load_profile` now saves the variables listed in `PROFILE_OVERRIDABLE_VARS`, sources the
+profile, and puts them back - logging that it did, so the override is visible in the run's own
+output rather than being something to remember.
+
+Worth generalising: **a config file that is sourced after the environment silently outranks
+it**, which is the opposite of what every caller expects. Either let the environment win or
+refuse the override loudly; quietly ignoring it produces a test that reports on the wrong
+build.

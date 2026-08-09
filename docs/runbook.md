@@ -347,6 +347,7 @@ have scenarios of their own, run through `bin/run-scenario-check.sh`:
 ./bin/run-scenario-check.sh --scenario paging   --profile v3   # seven destinations, two pages
 ./bin/run-scenario-check.sh --scenario companion --profile v3  # issue #21
 ./bin/run-scenario-check.sh --scenario cost      --profile v3   # travel cost + confirmation
+./bin/run-scenario-check.sh --scenario forget    --profile v3   # removing a destination
 ```
 
 **distance** is the one that matters most. Every other travel scenario spawns its traders at
@@ -365,6 +366,12 @@ also covers the confirmation screen, which only appears when a trip costs someth
 has never been rendered by any other scenario. `COST_ITEM` / `COST_PER_METER` /
 `COST_MINIMUM` change the terms; the default charges a floor of 7 casino tokens so the
 expected number does not depend on the distance.
+
+**forget** covers issue #58 - a destination could be recorded but never removed. It records
+three traders, forgets one through the dialog, and checks that it is gone from the list *and*
+from the save, that the other destinations are untouched, that backing out of the confirmation
+removes nothing, and that visiting the trader again brings it back. That last one is what
+makes the feature a tidy-up rather than data loss.
 
 **paging** records seven destinations - four different traders where the player stands, then
 three more 400m away, because traders near each other share one destination key - and walks
@@ -520,6 +527,23 @@ file's ⋮ menu, and set the older version to Old version.
 
 What this still does **not** do, because the Upload API does not expose it: create a mod page,
 edit the Full description, or change tags.
+
+### Testing a branch
+
+Profile settings can be overridden from the environment for one run:
+
+```bash
+VTT_BRANCH=feature/my-change ./bin/run-scenario-check.sh --scenario forget --profile v3
+```
+
+Only the variables in `PROFILE_OVERRIDABLE_VARS` (`lib/common.sh`) work this way -
+`VTT_BRANCH` and `CLIENT_LANGUAGE`. Everything else in the profile wins, deliberately: a
+half-overridden environment is harder to reason about than one that is either the profile or
+an explicit exception to it.
+
+This matters more than it looks. `load_profile` sources the profile, so before this existed
+an environment variable was silently overwritten by it - a run launched to test a feature
+branch quietly tested `main` instead, and the only sign was that the feature "did not work".
 
 ### The ids, and doing it by hand
 

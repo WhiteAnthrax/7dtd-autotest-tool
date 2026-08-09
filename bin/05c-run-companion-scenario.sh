@@ -57,6 +57,8 @@ source "$ROOT_DIR/lib/server-console.sh"
 source "$ROOT_DIR/lib/docker-server.sh"
 # shellcheck source=lib/world-console.sh
 source "$ROOT_DIR/lib/world-console.sh"
+# shellcheck source=lib/dialog-drive.sh
+source "$ROOT_DIR/lib/dialog-drive.sh"
 
 # Surface `set -e` failures instead of exiting silently (see lib/common.sh).
 trace_errors
@@ -126,21 +128,7 @@ trap capture_on_failure EXIT
 #
 # These are client-side on purpose even when the world lives on a server: XUiC_DialogWindowGroup
 # needs LocalPlayerUI, which only the client has.
-tp_dialog() {
-    local result ok
-    result="$(submit_and_check "testpilot dialog $*")"
-    ok="$(vtt_result_field "$result" ok)"
-    [ "$ok" = "true" ] || die "testpilot dialog $* failed: $(printf '%s' "$result" | jq -r '.output')"
-    printf '%s' "$result"
-}
 
-tp_dialog_dump() {
-    local result dump
-    result="$(tp_dialog dump)"
-    dump="$(printf '%s' "$result" | jq -r '.output' | grep -oP '^TESTPILOT_DIALOG_DUMP \K.*' | tail -1 || true)"
-    [ -n "$dump" ] || die "no TESTPILOT_DIALOG_DUMP marker in: $(printf '%s' "$result" | jq -r '.output')"
-    printf '%s' "$dump"
-}
 
 # entity_position <le output> <entity id>: "x, y, z" as `le` printed it.
 entity_position() {
@@ -291,16 +279,11 @@ log "travelling through the dialog"
 tp_dialog open "$BOB_ID" >/dev/null
 tp_dialog select vtt_open >/dev/null
 DEST_DUMP="$(tp_dialog_dump)"
-DEST_ID="$(printf '%s' "$DEST_DUMP" | jq -r '
-    [.entries[].id
-     | select(. != null)
-     | select(startswith("vtt_destination_")
-              and . != "vtt_destination_page_next"
-              and . != "vtt_destination_page_previous")] | first // empty')"
+DEST_ID="$(dialog_first_destination "$DEST_DUMP")"
 [ -n "$DEST_ID" ] || die "no destination offered in the dialog: $DEST_DUMP"
 DEST_KEY="$(printf '%s' "$DEST_DUMP" | jq -r --arg id "$DEST_ID" '.entries[] | select(.id == $id) | .text')"
 log "travelling to ${DEST_ID} (${DEST_KEY})"
-tp_dialog select "$DEST_ID" >/dev/null
+log "  dialog path: $(dialog_travel_to "$DEST_ID")"
 # The server prepares the destination before moving anyone, and the gather runs after arrival.
 sleep 20
 
