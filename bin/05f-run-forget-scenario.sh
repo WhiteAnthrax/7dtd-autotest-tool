@@ -157,8 +157,17 @@ CANCEL_COUNT="$(printf '%s' "$AFTER_CANCEL_IDS" | jq 'length')"
 log "after cancelling: ${CANCEL_COUNT} destinations"
 
 # --- forgetting it ------------------------------------------------------------------------
+# The mod logs which outcome it decided on, and that decision is what picks the sentence the
+# player is shown. Reading it here is the difference between "the destination disappeared"
+# and "the destination disappeared *and* the player was told the right thing" - the first
+# version of this feature got the second part wrong in every single-player run and no check
+# noticed, because nothing looked at the message.
+FORGOT_LINES_BEFORE="$(world_log_grep_count 'VisitedTraderTeleport\] Forgot')"
 log "step 2: forgetting ${TARGET_ID}"
 dialog_forget "$TARGET_ID"
+FORGOT_LINES="$(( $(world_log_grep_count 'VisitedTraderTeleport\] Forgot') - FORGOT_LINES_BEFORE ))"
+FORGET_OUTCOME="$(world_log_grep_last 'VisitedTraderTeleport\] Forgot .*' | grep -oP '\(\K[A-Za-z]+(?=\)\.?$)' | tail -1 || true)"
+log "the mod reported outcome: ${FORGET_OUTCOME:-<none>} (${FORGOT_LINES} line(s))"
 
 AFTER_DUMP="$(list_destinations)"
 take_screenshot "04-after-forget"
@@ -194,6 +203,7 @@ jq -n \
     --arg target_id "$TARGET_ID" \
     --arg target_text "$TARGET_TEXT" \
     --arg forget_prompt "$FORGET_PROMPT" \
+    --arg forget_outcome "$FORGET_OUTCOME" \
     --arg screenshot_dir "${LOCAL_SHOT_DIR#"$ROOT_DIR/"}" \
     --argjson action_screen_offers_forget "$ACTION_HAS_FORGET" \
     --argjson before "$BEFORE_IDS" \
@@ -207,6 +217,7 @@ jq -n \
       target: {id: $target_id, text: $target_text},
       action_screen_offers_forget: $action_screen_offers_forget,
       forget_prompt: $forget_prompt,
+      forget_outcome: $forget_outcome,
       destinations: {before: $before,
                      after_cancel: $after_cancel,
                      after: $after,

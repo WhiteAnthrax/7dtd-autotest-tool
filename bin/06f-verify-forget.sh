@@ -62,12 +62,19 @@ jq '
 
     # A prompt that never resolved would show the raw key.
     prompt_localized: ((.forget_prompt | length) > 0 and (.forget_prompt | test("vtt_") | not)),
+
+    # And the mod picked the right thing to *say*. In a scenario with one player, forgetting
+    # your own visit leaves nothing behind, so anything other than "Removed" means the player
+    # was shown a sentence describing a situation they are not in.
+    forget_outcome: .forget_outcome,
+    outcome_was_removed: (.forget_outcome == "Removed"),
     screenshots: (.screenshots | length),
     screenshot_dir
   }
 | .ok = (.offered_before and .action_screen_offers_forget and .cancel_kept_everything
          and .target_is_gone and .others_untouched and .save_was_readable
-         and .save_lost_exactly_one and .revisiting_brought_it_back and .prompt_localized)' \
+         and .save_lost_exactly_one and .revisiting_brought_it_back and .prompt_localized
+         and .outcome_was_removed)' \
     "$RESULT_FILE" > "$VERDICT_FILE"
 
 jq -r '
@@ -75,7 +82,8 @@ jq -r '
     "  target:   \(.target.text)",
     "  list:     \(.counts.before) -> cancel \(.counts.after_cancel) -> forget \(.counts.after) -> revisit \(.counts.after_revisit)",
     "  save:     \(.saved_visits.before) -> \(.saved_visits.after) visits",
-    "  prompt:   \"\(.forget_prompt)\""' "$VERDICT_FILE"
+    "  prompt:   \"\(.forget_prompt)\"",
+    "  outcome:  \(.forget_outcome)"' "$VERDICT_FILE"
 
 if [ "$(jq -r '.ok' "$VERDICT_FILE")" != "true" ]; then
     jq -r 'to_entries[] | select(.value == false) | "  FAILED: \(.key)"' "$VERDICT_FILE"

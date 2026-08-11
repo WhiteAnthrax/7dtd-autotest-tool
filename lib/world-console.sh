@@ -120,3 +120,22 @@ world_spawn_entity() {
     done
     return 1
 }
+
+# world_log_grep_last <pattern>: the most recent line matching <pattern>, from whichever log
+# the game is writing. Counting tells you something happened; this tells you what it decided.
+world_log_grep_last() {
+    local pattern="$1"
+    case "${TESTPILOT_MODE:-connect}" in
+        hostload)
+            run_on_omen_cmd "\$p = Join-Path \$env:USERPROFILE 'AppData\\\\LocalLow\\\\The Fun Pimps\\\\7 Days To Die\\\\Player.log'; if (Test-Path \$p) { (Select-String -Path \$p -Pattern '${pattern}' | Select-Object -Last 1).Line }" \
+                | tr -d '\r' || true
+            ;;
+        connect)
+            local log
+            log="$(docker_server_latest_log)"
+            if [ -n "$log" ]; then
+                grep -oE "$pattern" "$log" | tail -1 || true
+            fi
+            ;;
+    esac
+}
