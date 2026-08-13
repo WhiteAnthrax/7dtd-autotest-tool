@@ -1057,3 +1057,60 @@ Worth generalising: **a config file that is sourced after the environment silent
 it**, which is the opposite of what every caller expects. Either let the environment win or
 refuse the override loudly; quietly ignoring it produces a test that reports on the wrong
 build.
+
+## The game negotiates package ids by name, and denies entry when it cannot
+
+Adding a sixth net package to the mod produced logs where client and server had
+assigned *different* ids to the same package types. That looked like a serious bug:
+if the ids differ, a "snapshot request" would arrive as a "visit report" and be
+read as a different structure entirely - silent corruption of a save file.
+
+It is not what happens, and the reasoning that led there was wrong in an
+instructive way. Decompiling `NetPackageManager` settled it:
+
+```csharp
+// StartServer() assigns 1..N. StartClient() starts with an empty table.
+// IdMappingsReceived(string[] names) fills the client's table from the server's:
+if (!knownPackageTypes.TryGetValue(_mappings[i], out var value))
+{
+    Log.Error("[NET] Unknown package type " + _mappings[i] + ", can not proceed connecting to server");
+    ConnectionManager.Instance.Disconnect();
+    GameManager.Instance.ShowMessagePlayerDenied(new KickPlayerData(EKickReason.UnknownNetPackage));
+    break;
+}
+```
+
+The ids logged at startup are the mod registering itself; **they are overwritten at
+connect by the server's table**. So after connecting the two sides always agree, and
+mis-dispatch cannot happen. What the logs showed was real and completely irrelevant.
+
+Three things fell out that matter more than the original question:
+
+- **A client without the mod cannot join a server that has it.** The server's name list
+  contains types a vanilla client has never heard of, so it is denied entry. That is a
+  property of every mod with custom net packages, and it was not written down anywhere.
+- **Adding a package type locks out every client that has not updated.** Same mechanism.
+  A server admin who updates first denies entry to all their players.
+- **The game checks names, not versions or formats.** Two builds with identical package
+  names connect happily and mis-read each other's payloads. That gap is real for this mod,
+  which changed its destination-key format once already.
+
+Worth keeping: **an observation can be entirely correct and still support a wrong
+conclusion.** The differing ids were really there in the logs. The error was assuming
+they were the ids that would be used, rather than asking where ids come from. Reading the
+mechanism took one decompile; reasoning about it had already burned an hour and produced
+a design for a problem that does not exist.
+
+## Measure the mismatch instead of arguing about it
+
+Several rounds of design went into "how should the mod detect a version mismatch", all of
+it resting on unverified guesses about how the game frames packages. The argument could
+not converge because nobody had run one.
+
+`bin/03-deploy-mods.sh` now takes `VTT_SERVER_RELEASE_PACKAGE`, which deploys a *different*
+build to the server than to the client. One run answered what an hour of reasoning had
+not: the client connects, the CRC does not care, and the ids come from the server.
+
+The general form, which this pipeline keeps re-learning: when a design debate depends on
+how the platform behaves, the cheapest move is to make the platform show you. The rig to
+do it is usually smaller than the argument, and it becomes the regression test afterwards.

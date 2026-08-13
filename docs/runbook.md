@@ -528,6 +528,24 @@ file's ⋮ menu, and set the older version to Old version.
 What this still does **not** do, because the Upload API does not expose it: create a mod page,
 edit the Full description, or change tags.
 
+### Testing a deliberate version mismatch
+
+`VTT_SERVER_RELEASE_PACKAGE` deploys a different build to the server than to the client, so
+a client/server mod mismatch can be produced on purpose:
+
+```bash
+VTT_RELEASE_PACKAGE=<new zip> VTT_SERVER_RELEASE_PACKAGE=<old zip> ./bin/03-deploy-mods.sh v3
+```
+
+This is the only way to find out what the game does about one, and what it does is not
+obvious - see `docs/ProtocolVersioning.md` in the mod repo. Briefly: package ids are
+negotiated by *name* at connect, a client that does not know one of the server's types is
+denied entry outright, and the connect-time CRC does not cover mod files at all.
+
+Both sides log `Registered ... as net package id` at startup. Those are the mod registering
+itself and are **overwritten at connect** by the server's table, so a difference there means
+nothing on its own.
+
 ### Testing a branch
 
 Profile settings can be overridden from the environment for one run:
