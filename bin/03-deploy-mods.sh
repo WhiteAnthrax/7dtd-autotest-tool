@@ -64,6 +64,31 @@ else
     DEPLOY_TEST_HARNESS=1
 fi
 
+# VTT_SERVER_RELEASE_PACKAGE deploys a *different* build to the server than to the client, so
+# a version mismatch can be produced deliberately. There is no other way to find out what the
+# game does about one: 7DTD's disconnect reasons include CRCMismatch and it computes a CRC on
+# connect, but which files that covers is not something the assembly's symbol names answer.
+# Running the mismatch is the only way to know whether a mod has to detect this itself.
+VTT_SERVER_RELEASE_PACKAGE="${VTT_SERVER_RELEASE_PACKAGE:-}"
+SERVER_VTT_DLL_SRC="$VTT_DLL_SRC"
+SERVER_VTT_CONFIG_SRC="$VTT_CONFIG_SRC"
+SERVER_DEPLOY_LABEL="$VTT_DEPLOY_LABEL"
+if [ -n "$VTT_SERVER_RELEASE_PACKAGE" ]; then
+    [ -f "$VTT_SERVER_RELEASE_PACKAGE" ] || die "VTT_SERVER_RELEASE_PACKAGE not found: $VTT_SERVER_RELEASE_PACKAGE"
+    require_cmd unzip
+    SERVER_RELEASE_DIR="$OUTPUT_DIR/server-release-mod"
+    rm -rf "$SERVER_RELEASE_DIR"
+    mkdir -p "$SERVER_RELEASE_DIR"
+    unzip -q "$VTT_SERVER_RELEASE_PACKAGE" -d "$SERVER_RELEASE_DIR" \
+        || die "failed to extract $VTT_SERVER_RELEASE_PACKAGE"
+    SERVER_VTT_DLL_SRC="$SERVER_RELEASE_DIR/VisitedTraderTeleport/VisitedTraderTeleport.dll"
+    SERVER_VTT_CONFIG_SRC="$SERVER_RELEASE_DIR/VisitedTraderTeleport/Config"
+    [ -f "$SERVER_VTT_DLL_SRC" ] \
+        || die "$VTT_SERVER_RELEASE_PACKAGE does not contain VisitedTraderTeleport/VisitedTraderTeleport.dll"
+    SERVER_DEPLOY_LABEL="released package $(basename "$VTT_SERVER_RELEASE_PACKAGE") (deliberately different from the client)"
+    log "MISMATCH MODE: the server gets ${SERVER_DEPLOY_LABEL}"
+fi
+
 # In hostload mode the client hosts the world and the Docker server is not involved at all,
 # so there is nothing to deploy to it - and restarting it would only bind the port the
 # hosting client wants.
@@ -81,8 +106,8 @@ log "backing up server-side VisitedTraderTeleport to $SERVER_BACKUP_DIR..."
 rm -rf "$SERVER_BACKUP_DIR"
 cp -a "$SERVER_VTT_DIR" "$SERVER_BACKUP_DIR"
 
-log "deploying VisitedTraderTeleport (${VTT_DEPLOY_LABEL}) to the server..."
-cp "$VTT_DLL_SRC" "$SERVER_VTT_DIR/VisitedTraderTeleport.dll"
+log "deploying VisitedTraderTeleport (${SERVER_DEPLOY_LABEL}) to the server..."
+cp "$SERVER_VTT_DLL_SRC" "$SERVER_VTT_DIR/VisitedTraderTeleport.dll"
 if [ "$DEPLOY_TEST_HARNESS" = "1" ]; then
     : > "$SERVER_VTT_DIR/EnableTestHarness.txt"
 else
@@ -110,7 +135,7 @@ cp "$OUTPUT_DIR/SdtdTestPilot.ModInfo.xml" "$SERVER_TESTPILOT_DIR/ModInfo.xml"
 # teardown's restore already covers this.
 log "deploying VisitedTraderTeleport Config/ to the server..."
 mkdir -p "$SERVER_VTT_DIR/Config"
-cp -rf "$VTT_CONFIG_SRC/." "$SERVER_VTT_DIR/Config/"
+cp -rf "$SERVER_VTT_CONFIG_SRC/." "$SERVER_VTT_DIR/Config/"
 
 # Reset visit history so vtttest record's canonicalized-key resolution is deterministic.
 # VisitedTraderTeleport merges a new visit into an existing destination when it falls
