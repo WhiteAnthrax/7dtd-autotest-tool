@@ -2,10 +2,9 @@
 # Driving the trader dialog through `testpilot dialog`, shared by every scenario that does it.
 #
 # These started as a copy in each scenario, which was tolerable while the copies agreed. They
-# stopped agreeing the moment picking a destination began going through an action screen
-# ("travel here / forget this destination / cancel") instead of departing immediately: three
-# scenarios handled the extra screen because a confirmation could already appear there, and
-# the fourth silently stopped travelling at all. Nothing errored - it just did not go
+# stopped agreeing the moment a screen appeared between picking a destination and departing:
+# three scenarios handled the extra screen because a confirmation could already appear there,
+# and the fourth silently stopped travelling at all. Nothing errored - it just did not go
 # anywhere, and the checks that noticed were two steps further on.
 #
 # Source after lib/common.sh and lib/testpilot-queue.sh.
@@ -53,9 +52,9 @@ dialog_first_destination() {
 # dialog_travel_to <destination response id>: picks the destination and completes the trip
 # the way a player does, through whatever screens the mod puts in between.
 #
-# Prints what it had to click, so a scenario can record it: "travel" when the action screen
-# appeared, "confirmed" when a confirmation was also required, "immediate" when the mod went
-# straight there. A scenario asserting on that string would be asserting on the mod's
+# Prints what it had to click, so a scenario can record it: "confirmed" when the mod asked
+# before departing, "confirmed-cost" when the question also carried a price, "immediate" when
+# it went straight there. A scenario asserting on that string would be asserting on the mod's
 # configuration rather than on its behaviour, so none of them do.
 dialog_travel_to() {
     local destination_id="$1"
@@ -64,30 +63,16 @@ dialog_travel_to() {
     tp_dialog select "$destination_id" >/dev/null
     sleep 2
 
-    # The action screen. Its "travel here" entry kept the id the old yes/no confirmation used,
-    # so this one branch covers both.
+    # The confirmation screen, which appears only when the Confirmation setting calls for it.
     dump="$(tp_dump_optional)"
     if printf '%s' "$dump" | jq -e '[.entries[].id] | any(. == "vtt_confirm_yes")' >/dev/null 2>&1; then
-        path="travel"
-        # A cost line means this is also a confirmation, which is worth recording separately.
+        path="confirmed"
+        # A cost line means the trip is also being charged for, worth recording separately.
         if printf '%s' "$dump" | jq -e '[.entries[].id] | any(. == "vtt_confirm_costline")' >/dev/null 2>&1; then
-            path="confirmed"
+            path="confirmed-cost"
         fi
         tp_dialog select vtt_confirm_yes >/dev/null
     fi
 
     printf '%s' "$path"
-}
-
-# dialog_forget <destination response id>: picks the destination and forgets it, through the
-# action screen and the confirmation that follows.
-dialog_forget() {
-    local destination_id="$1"
-
-    tp_dialog select "$destination_id" >/dev/null
-    sleep 2
-    tp_dialog select vtt_forget >/dev/null
-    sleep 1
-    tp_dialog select vtt_forget_yes >/dev/null
-    sleep 2
 }
