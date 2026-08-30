@@ -232,6 +232,70 @@ for `READY_TIMEOUT_SECONDS` and then reporting nothing useful. If you see that e
 Only a *confirmed* mismatch is fatal. If either version can't be read the run logs a
 warning and continues, so this check can't block an otherwise-fine run.
 
+## When 7 Days to Die gets a new version
+
+A game release touches neither this repository nor the mod, so nothing fails on its own -
+and by the time anyone runs the pipeline the server has already updated itself. Work
+through this before believing a result, and before telling players a version is supported.
+
+**First, find out what you actually have.** The names lie: the client profile is called
+`3.0Vanilla` whatever version is inside it, and a ModLauncher profile holds no game files
+at all until the launcher clones one into it.
+
+```bash
+# server (appid 294420)
+grep -iE 'buildid|BetaKey|LastUpdated' \
+    /zfs/GAME-SERVERS/7dtd-server/data/serverfiles/steamapps/appmanifest_294420.acf
+date -d @<LastUpdated>
+
+# client (appid 251570) - findstr, because a pipe inside ssh + powershell is eaten by cmd
+ssh omen-build 'findstr /i "buildid BetaKey LastUpdated" D:\SteamLibrary\steamapps\appmanifest_251570.acf'
+```
+
+`7DaysToDie.exe`'s ProductVersion is the Unity version, not the game's. It is no use here.
+
+Then, cheapest first:
+
+1. **Build the mod against the new assemblies.** `Invoke-WindowsBuild.ps1 -Mode Isolated
+   -Ref branch:<name> -GamePath "D:\SteamLibrary\steamapps\common\7 Days To Die"`. Pass
+   `-GamePath` explicitly - the default may point at a profile folder with no game in it -
+   and push first, because the ref is resolved against the remote. A clean build covers
+   every game type the mod names and every patch target written with `nameof`.
+
+2. **Check the patch targets the compiler cannot see.** `[HarmonyPatch(typeof(X), "Name")]`
+   takes a string, so nothing verifies it until it fails at runtime:
+   `ssh omen-build 'findstr /m /c:"SetupBaseMapping" "D:\...\Assembly-CSharp.dll"'`
+
+3. **Check the XPath anchors.** The mod's `dialogs.xml` hangs its entries off
+   `/dialogs/dialog[@id='trader']/statement[@id='start']/response_entry[@id='done']`. If the
+   game moves it the patch silently applies to nothing. Copy the game's `Data/Config/
+   dialogs.xml` down (`ssh omen-build 'type "...\dialogs.xml"'`) and check it locally -
+   passing an XPath through ssh into PowerShell is a quoting fight you will lose.
+
+4. **Run the scenarios.** `./bin/run-scenario-check.sh --scenario <companion|distance|
+   paging|cost> --profile v3`. The first run also updates the server, so allow for the
+   download.
+
+5. **Verify the package players already have - not a fresh build.** This is the step that
+   gets skipped, and it is the only one that answers the question being asked.
+
+A build from today's branch proves the *source* still fits the new game. It says nothing
+about the ZIP on Nexus, which is a different binary: it was compiled against the older
+game's assemblies. Nor does the reverse hold - a binary compiled against the new
+assemblies is not guaranteed to load on the older ones, which is exactly what a
+"3.0 / 3.1 / 3.2" line on the mod page claims. Only the shipped artifact, run on the new
+game, settles it:
+
+```bash
+gh release download v0.7.11 --repo WhiteAnthrax/VisitedTraderTeleport --dir /tmp/published
+VTT_BRANCH=<branch matching that release> ./bin/run-release-verification.sh \
+    --profile v3 --package /tmp/published/VisitedTraderTeleport-0.7.11.zip \
+    --languages english --fresh-save
+```
+
+If it passes, the supported-versions line on Nexus can gain the new version with no new
+release: the file users already have is the file that was tested.
+
 ## Verifying a change
 
 ```bash
@@ -281,6 +345,12 @@ Then run this on the ZIP before publishing it:
 ```
 
 Watch for `RELEASE_VERIFICATION_RESULT {... "packaged_config":"identical","ok":true ...}`.
+
+`packaged_config` compares the ZIP's `Config/` against a Debug build of **`VTT_BRANCH`** -
+the profile's value unless the environment overrides it. Verifying a package built from
+anywhere else therefore needs `VTT_BRANCH=<that ref>` on the command line, or the
+comparison is against the wrong branch and comes back `differs` while every behavioural
+check passes. That failure is about which two things were compared, not about the mod.
 
 The result file records the ZIP's `sha256` and, from the provenance sidecar, the commit it
 was built from; `bin/publish-to-nexus.sh` refuses to upload a file whose hash does not match
