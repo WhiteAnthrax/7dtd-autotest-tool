@@ -1132,3 +1132,11 @@ used it, so a later run that fails before its own backup has nothing stale to re
 The general point: a backup is only valid for the run that took it, and "restore" is only
 safe when it knows what it is restoring over. A shared scratch location turns a
 leftover into someone else's data.
+
+The second run then failed copying the DLL into a folder that did not exist, which exposed
+the rest of the same assumption: only the DLL and `Config/` were ever deployed, so the
+mod's `ModInfo.xml` was always whatever the install already had. On a fresh client that
+is nothing, and the game skips a mod folder without one. On the server it meant the log
+said `Loaded Mod: VisitedTraderTeleport (0.7.9)` while 0.8.1 was under test. The deploy
+now creates the folder and ships the `ModInfo.xml` that belongs to the build or package,
+and the client backs it up and restores it like the DLL.

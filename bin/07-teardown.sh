@@ -53,7 +53,7 @@ if [ -n "${CLIENT_MODS_DIR:-}" ] && [ -n "${VTT_CLIENT_MOD_DIRNAME:-}" ] && [ -n
     # Test-Path rather than -ErrorAction SilentlyContinue: that leaves $? false even though
     # it suppressed the error, so powershell.exe exits 1 and every teardown warned about a
     # restore that had nothing to do (see docs/lessons-learned.md).
-    run_on_omen_cmd "if (Test-Path '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig') { Copy-Item '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig' '${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll' -Force } else { Write-Output 'NO_DLL_BACKUP' }; if (Test-Path '${CLIENT_VTT_DIR}\\EnableTestHarness.txt') { Remove-Item '${CLIENT_VTT_DIR}\\EnableTestHarness.txt' -Force }" \
+    run_on_omen_cmd "if (Test-Path '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig') { Copy-Item '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig' '${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll' -Force } else { Write-Output 'NO_DLL_BACKUP' }; if (Test-Path '${CLIENT_BACKUP_DIR}\\ModInfo.xml.orig') { Copy-Item '${CLIENT_BACKUP_DIR}\\ModInfo.xml.orig' '${CLIENT_VTT_DIR}\\ModInfo.xml' -Force }; if (Test-Path '${CLIENT_VTT_DIR}\\EnableTestHarness.txt') { Remove-Item '${CLIENT_VTT_DIR}\\EnableTestHarness.txt' -Force }" \
         || log "warn: failed to restore client-side VisitedTraderTeleport (continuing)"
 
     # Config/ is deployed alongside the DLL by 03-deploy-mods.sh, so it has to be put back
@@ -66,7 +66,7 @@ if [ -n "${CLIENT_MODS_DIR:-}" ] && [ -n "${VTT_CLIENT_MOD_DIRNAME:-}" ] && [ -n
     # A backup is good for the run that took it. Left in place, the next teardown of a run
     # that failed before its own backup would put these files into whatever profile that
     # run used.
-    run_on_omen_cmd "foreach (\$name in 'VisitedTraderTeleport.dll.orig', 'Config.orig') { \$used = Join-Path '${CLIENT_BACKUP_DIR}' \$name; if (Test-Path \$used) { Remove-Item \$used -Recurse -Force } }" \
+    run_on_omen_cmd "foreach (\$name in 'VisitedTraderTeleport.dll.orig', 'ModInfo.xml.orig', 'Config.orig') { \$used = Join-Path '${CLIENT_BACKUP_DIR}' \$name; if (Test-Path \$used) { Remove-Item \$used -Recurse -Force } }" \
         || log "warn: failed to clear the used client-side backup (continuing)"
 
     log "removing SdtdTestPilot from the client..."
