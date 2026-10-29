@@ -45,6 +45,10 @@ fi
 if [ -n "${CLIENT_MODS_DIR:-}" ] && [ -n "${VTT_CLIENT_MOD_DIRNAME:-}" ] && [ -n "${OMEN_SCRATCH_DIR:-}" ]; then
     CLIENT_VTT_DIR="${CLIENT_MODS_DIR}\\${VTT_CLIENT_MOD_DIRNAME}"
     CLIENT_BACKUP_DIR="${OMEN_SCRATCH_DIR}\\mod-backup"
+    # 03-deploy-mods.sh leaves NOT_INSTALLED when the client had no mod folder before the
+    # run. Restoring into it would leave our build behind, so the folder goes instead.
+    run_on_omen_cmd "if (Test-Path '${CLIENT_BACKUP_DIR}\\NOT_INSTALLED') { if (Test-Path '${CLIENT_VTT_DIR}') { Remove-Item '${CLIENT_VTT_DIR}' -Recurse -Force }; Remove-Item '${CLIENT_BACKUP_DIR}\\NOT_INSTALLED' -Force; Write-Output 'removed the client-side VisitedTraderTeleport this run installed' }" \
+        || log "warn: failed to remove the client-side VisitedTraderTeleport this run installed (continuing)"
     log "restoring client-side VisitedTraderTeleport from backup..."
     # Test-Path rather than -ErrorAction SilentlyContinue: that leaves $? false even though
     # it suppressed the error, so powershell.exe exits 1 and every teardown warned about a
@@ -58,6 +62,12 @@ if [ -n "${CLIENT_MODS_DIR:-}" ] && [ -n "${VTT_CLIENT_MOD_DIRNAME:-}" ] && [ -n
     log "restoring client-side VisitedTraderTeleport Config/ from backup..."
     run_on_omen_cmd "if (Test-Path '${CLIENT_BACKUP_DIR}\\Config.orig') { Remove-Item '${CLIENT_VTT_DIR}\\Config' -Recurse -Force -ErrorAction SilentlyContinue; Copy-Item '${CLIENT_BACKUP_DIR}\\Config.orig' '${CLIENT_VTT_DIR}\\Config' -Recurse -Force }" \
         || log "warn: failed to restore client-side Config/ (continuing)"
+
+    # A backup is good for the run that took it. Left in place, the next teardown of a run
+    # that failed before its own backup would put these files into whatever profile that
+    # run used.
+    run_on_omen_cmd "foreach (\$name in 'VisitedTraderTeleport.dll.orig', 'Config.orig') { \$used = Join-Path '${CLIENT_BACKUP_DIR}' \$name; if (Test-Path \$used) { Remove-Item \$used -Recurse -Force } }" \
+        || log "warn: failed to clear the used client-side backup (continuing)"
 
     log "removing SdtdTestPilot from the client..."
     run_on_omen_cmd "Remove-Item '${CLIENT_MODS_DIR}\\SdtdTestPilot' -Recurse -Force -ErrorAction SilentlyContinue" \

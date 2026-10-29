@@ -182,7 +182,11 @@ CLIENT_VTT_DIR="${CLIENT_MODS_DIR}\\${VTT_CLIENT_MOD_DIRNAME}"
 CLIENT_BACKUP_DIR="${OMEN_SCRATCH_DIR}\\mod-backup"
 
 log "backing up client-side VisitedTraderTeleport to $OMEN_SSH_HOST:$CLIENT_BACKUP_DIR..."
-run_on_omen_cmd "New-Item -ItemType Directory -Force -Path '${CLIENT_BACKUP_DIR}' | Out-Null; Copy-Item '${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll' '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig' -Force"
+# The backup dir is shared by every profile, so clear anything an earlier run left first:
+# otherwise teardown "restores" another install's files into this one. A client with no
+# VisitedTraderTeleport installed (a fresh game profile) is recorded as NOT_INSTALLED, and
+# teardown removes the mod folder instead of restoring it.
+run_on_omen_cmd "New-Item -ItemType Directory -Force -Path '${CLIENT_BACKUP_DIR}' | Out-Null; foreach (\$name in 'VisitedTraderTeleport.dll.orig', 'Config.orig', 'NOT_INSTALLED') { \$stale = Join-Path '${CLIENT_BACKUP_DIR}' \$name; if (Test-Path \$stale) { Remove-Item \$stale -Recurse -Force } }; if (Test-Path '${CLIENT_VTT_DIR}') { Copy-Item '${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll' '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig' -Force } else { New-Item -ItemType File -Force -Path '${CLIENT_BACKUP_DIR}\\NOT_INSTALLED' | Out-Null; Write-Output 'client has no VisitedTraderTeleport installed; teardown will remove it again' }"
 
 # Unlike the server side (whose whole mod dir is copied to SERVER_BACKUP_DIR above), the
 # client backup is file-by-file, so Config/ needs its own copy before it is overwritten.

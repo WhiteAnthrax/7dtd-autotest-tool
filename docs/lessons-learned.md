@@ -1114,3 +1114,21 @@ not: the client connects, the CRC does not care, and the ids come from the serve
 The general form, which this pipeline keeps re-learning: when a design debate depends on
 how the platform behaves, the cheapest move is to make the platform show you. The rig to
 do it is usually smaller than the argument, and it becomes the regression test afterwards.
+
+## A backup shared by every profile restores the wrong install
+
+The first run against a fresh `3.4_Vanilla` profile stopped at the client backup:
+`03-deploy-mods.sh` copied `Mods\VisitedTraderTeleport\VisitedTraderTeleport.dll`
+unconditionally, and that profile had no mod installed. Teardown then did worse than fail.
+`OMEN_SCRATCH_DIR\mod-backup` is one folder for every profile, and it still held the
+`3.0Vanilla` files from a run weeks earlier, so "restoring from backup" created a
+`VisitedTraderTeleport\Config` in the 3.4 profile that had never been there.
+
+Now the backup step clears what an earlier run left before it takes its own, records
+`NOT_INSTALLED` when the client has no mod folder, and teardown removes the folder in
+that case instead of restoring into it. Teardown also deletes the backup once it has
+used it, so a later run that fails before its own backup has nothing stale to restore.
+
+The general point: a backup is only valid for the run that took it, and "restore" is only
+safe when it knows what it is restoring over. A shared scratch location turns a
+leftover into someone else's data.
