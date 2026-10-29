@@ -108,10 +108,18 @@ if [ -n "${SERVER_MODS_DIR:-}" ]; then
     fi
 
     if [ -d "$SERVER_BACKUP_DIR" ]; then
+        # The whole directory, not just the DLL: the deploy also replaces ModInfo.xml and
+        # Config/, and the travel cost scenario edits Config/VisitedTraderTeleport.xml. Putting
+        # back only the DLL left the server charging casino coins after every release run.
         log "restoring server-side VisitedTraderTeleport from backup..."
-        cp -f "$SERVER_BACKUP_DIR/VisitedTraderTeleport.dll" "$SERVER_VTT_DIR/VisitedTraderTeleport.dll" \
-            || log "warn: failed to restore server-side VisitedTraderTeleport.dll (continuing)"
-        rm -f "$SERVER_VTT_DIR/EnableTestHarness.txt"
+        # The backup is then dropped for the same reason as the client's: a later run that
+        # fails before taking its own would otherwise restore this one.
+        if rm -rf "$SERVER_VTT_DIR" && cp -a "$SERVER_BACKUP_DIR" "$SERVER_VTT_DIR"; then
+            rm -f "$SERVER_VTT_DIR/EnableTestHarness.txt"
+            rm -rf "$SERVER_BACKUP_DIR"
+        else
+            log "warn: failed to restore server-side VisitedTraderTeleport - the backup is kept at $SERVER_BACKUP_DIR (continuing)"
+        fi
     else
         log "warn: no server-side backup found at $SERVER_BACKUP_DIR, leaving server mod as-is"
     fi

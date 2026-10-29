@@ -1140,3 +1140,10 @@ is nothing, and the game skips a mod folder without one. On the server it meant 
 said `Loaded Mod: VisitedTraderTeleport (0.7.9)` while 0.8.1 was under test. The deploy
 now creates the folder and ships the `ModInfo.xml` that belongs to the build or package,
 and the client backs it up and restores it like the DLL.
+
+The server side had the mirror image of this. `03-deploy-mods.sh` backed up the whole mod
+folder, but teardown copied back only the DLL. Whatever else the run changed stayed: the
+release run's travel cost scenario leaves `TravelCost enabled="true" item="casinoCoin"` in
+`Config/VisitedTraderTeleport.xml`, so the server went on charging casino coins for every
+trip after the run "restored" it, and `ModInfo.xml` stayed at the tested version over the
+old DLL. Teardown now puts back the whole folder and then drops the backup.
