@@ -53,6 +53,7 @@ if [ -n "$VTT_RELEASE_PACKAGE" ]; then
         || die "$VTT_RELEASE_PACKAGE does not contain VisitedTraderTeleport/VisitedTraderTeleport.dll"
     VTT_DLL_SRC="$VTT_SRC_DIR/VisitedTraderTeleport.dll"
     VTT_CONFIG_SRC="$VTT_SRC_DIR/Config"
+    VTT_MODINFO_SRC="$VTT_SRC_DIR/ModInfo.xml"
     VTT_DEPLOY_LABEL="released package $(basename "$VTT_RELEASE_PACKAGE")"
     DEPLOY_TEST_HARNESS=0
 else
@@ -60,9 +61,11 @@ else
     [ -d "$OUTPUT_DIR/mod-config" ] || die "missing $OUTPUT_DIR/mod-config (run 02-build-mods.sh first)"
     VTT_DLL_SRC="$OUTPUT_DIR/VisitedTraderTeleport.debug.dll"
     VTT_CONFIG_SRC="$OUTPUT_DIR/mod-config"
+    VTT_MODINFO_SRC="$OUTPUT_DIR/VisitedTraderTeleport.ModInfo.xml"
     VTT_DEPLOY_LABEL="Debug build"
     DEPLOY_TEST_HARNESS=1
 fi
+[ -f "$VTT_MODINFO_SRC" ] || die "missing $VTT_MODINFO_SRC (a Debug run needs 02-build-mods.sh first)"
 
 # VTT_SERVER_RELEASE_PACKAGE deploys a *different* build to the server than to the client, so
 # a version mismatch can be produced deliberately. There is no other way to find out what the
@@ -72,6 +75,7 @@ fi
 VTT_SERVER_RELEASE_PACKAGE="${VTT_SERVER_RELEASE_PACKAGE:-}"
 SERVER_VTT_DLL_SRC="$VTT_DLL_SRC"
 SERVER_VTT_CONFIG_SRC="$VTT_CONFIG_SRC"
+SERVER_VTT_MODINFO_SRC="$VTT_MODINFO_SRC"
 SERVER_DEPLOY_LABEL="$VTT_DEPLOY_LABEL"
 if [ -n "$VTT_SERVER_RELEASE_PACKAGE" ]; then
     [ -f "$VTT_SERVER_RELEASE_PACKAGE" ] || die "VTT_SERVER_RELEASE_PACKAGE not found: $VTT_SERVER_RELEASE_PACKAGE"
@@ -83,6 +87,7 @@ if [ -n "$VTT_SERVER_RELEASE_PACKAGE" ]; then
         || die "failed to extract $VTT_SERVER_RELEASE_PACKAGE"
     SERVER_VTT_DLL_SRC="$SERVER_RELEASE_DIR/VisitedTraderTeleport/VisitedTraderTeleport.dll"
     SERVER_VTT_CONFIG_SRC="$SERVER_RELEASE_DIR/VisitedTraderTeleport/Config"
+    SERVER_VTT_MODINFO_SRC="$SERVER_RELEASE_DIR/VisitedTraderTeleport/ModInfo.xml"
     [ -f "$SERVER_VTT_DLL_SRC" ] \
         || die "$VTT_SERVER_RELEASE_PACKAGE does not contain VisitedTraderTeleport/VisitedTraderTeleport.dll"
     SERVER_DEPLOY_LABEL="released package $(basename "$VTT_SERVER_RELEASE_PACKAGE") (deliberately different from the client)"
@@ -108,6 +113,9 @@ cp -a "$SERVER_VTT_DIR" "$SERVER_BACKUP_DIR"
 
 log "deploying VisitedTraderTeleport (${SERVER_DEPLOY_LABEL}) to the server..."
 cp "$SERVER_VTT_DLL_SRC" "$SERVER_VTT_DIR/VisitedTraderTeleport.dll"
+# The ModInfo.xml that goes with the DLL, so the server log names the version under test
+# rather than whichever one was installed before. Covered by the whole-dir backup above.
+cp "$SERVER_VTT_MODINFO_SRC" "$SERVER_VTT_DIR/ModInfo.xml"
 if [ "$DEPLOY_TEST_HARNESS" = "1" ]; then
     : > "$SERVER_VTT_DIR/EnableTestHarness.txt"
 else
@@ -182,14 +190,20 @@ CLIENT_VTT_DIR="${CLIENT_MODS_DIR}\\${VTT_CLIENT_MOD_DIRNAME}"
 CLIENT_BACKUP_DIR="${OMEN_SCRATCH_DIR}\\mod-backup"
 
 log "backing up client-side VisitedTraderTeleport to $OMEN_SSH_HOST:$CLIENT_BACKUP_DIR..."
-run_on_omen_cmd "New-Item -ItemType Directory -Force -Path '${CLIENT_BACKUP_DIR}' | Out-Null; Copy-Item '${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll' '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig' -Force"
+# The backup dir is shared by every profile, so clear anything an earlier run left first:
+# otherwise teardown "restores" another install's files into this one. A client with no
+# VisitedTraderTeleport installed (a fresh game profile) is recorded as NOT_INSTALLED, and
+# teardown removes the mod folder instead of restoring it.
+run_on_omen_cmd "New-Item -ItemType Directory -Force -Path '${CLIENT_BACKUP_DIR}' | Out-Null; foreach (\$name in 'VisitedTraderTeleport.dll.orig', 'ModInfo.xml.orig', 'Config.orig', 'NOT_INSTALLED') { \$stale = Join-Path '${CLIENT_BACKUP_DIR}' \$name; if (Test-Path \$stale) { Remove-Item \$stale -Recurse -Force } }; if (Test-Path '${CLIENT_VTT_DIR}') { Copy-Item '${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll' '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig' -Force; if (Test-Path '${CLIENT_VTT_DIR}\\ModInfo.xml') { Copy-Item '${CLIENT_VTT_DIR}\\ModInfo.xml' '${CLIENT_BACKUP_DIR}\\ModInfo.xml.orig' -Force } } else { New-Item -ItemType File -Force -Path '${CLIENT_BACKUP_DIR}\\NOT_INSTALLED' | Out-Null; Write-Output 'client has no VisitedTraderTeleport installed; teardown will remove it again' }"
 
 # Unlike the server side (whose whole mod dir is copied to SERVER_BACKUP_DIR above), the
 # client backup is file-by-file, so Config/ needs its own copy before it is overwritten.
 run_on_omen_cmd "Remove-Item '${CLIENT_BACKUP_DIR}\\Config.orig' -Recurse -Force -ErrorAction SilentlyContinue; if (Test-Path '${CLIENT_VTT_DIR}\\Config') { Copy-Item '${CLIENT_VTT_DIR}\\Config' '${CLIENT_BACKUP_DIR}\\Config.orig' -Recurse -Force }"
 
 log "deploying VisitedTraderTeleport (${VTT_DEPLOY_LABEL}) to the client..."
+run_on_omen_cmd "New-Item -ItemType Directory -Force -Path '${CLIENT_VTT_DIR}' | Out-Null"
 copy_to_omen "$VTT_DLL_SRC" "${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll"
+copy_to_omen "$VTT_MODINFO_SRC" "${CLIENT_VTT_DIR}\\ModInfo.xml"
 if [ "$DEPLOY_TEST_HARNESS" = "1" ]; then
     run_on_omen_cmd "New-Item -ItemType File -Force -Path '${CLIENT_VTT_DIR}\\EnableTestHarness.txt' | Out-Null"
 else

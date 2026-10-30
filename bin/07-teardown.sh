@@ -45,11 +45,15 @@ fi
 if [ -n "${CLIENT_MODS_DIR:-}" ] && [ -n "${VTT_CLIENT_MOD_DIRNAME:-}" ] && [ -n "${OMEN_SCRATCH_DIR:-}" ]; then
     CLIENT_VTT_DIR="${CLIENT_MODS_DIR}\\${VTT_CLIENT_MOD_DIRNAME}"
     CLIENT_BACKUP_DIR="${OMEN_SCRATCH_DIR}\\mod-backup"
+    # 03-deploy-mods.sh leaves NOT_INSTALLED when the client had no mod folder before the
+    # run. Restoring into it would leave our build behind, so the folder goes instead.
+    run_on_omen_cmd "if (Test-Path '${CLIENT_BACKUP_DIR}\\NOT_INSTALLED') { if (Test-Path '${CLIENT_VTT_DIR}') { Remove-Item '${CLIENT_VTT_DIR}' -Recurse -Force }; Remove-Item '${CLIENT_BACKUP_DIR}\\NOT_INSTALLED' -Force; Write-Output 'removed the client-side VisitedTraderTeleport this run installed' }" \
+        || log "warn: failed to remove the client-side VisitedTraderTeleport this run installed (continuing)"
     log "restoring client-side VisitedTraderTeleport from backup..."
     # Test-Path rather than -ErrorAction SilentlyContinue: that leaves $? false even though
     # it suppressed the error, so powershell.exe exits 1 and every teardown warned about a
     # restore that had nothing to do (see docs/lessons-learned.md).
-    run_on_omen_cmd "if (Test-Path '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig') { Copy-Item '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig' '${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll' -Force } else { Write-Output 'NO_DLL_BACKUP' }; if (Test-Path '${CLIENT_VTT_DIR}\\EnableTestHarness.txt') { Remove-Item '${CLIENT_VTT_DIR}\\EnableTestHarness.txt' -Force }" \
+    run_on_omen_cmd "if (Test-Path '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig') { Copy-Item '${CLIENT_BACKUP_DIR}\\VisitedTraderTeleport.dll.orig' '${CLIENT_VTT_DIR}\\VisitedTraderTeleport.dll' -Force } else { Write-Output 'NO_DLL_BACKUP' }; if (Test-Path '${CLIENT_BACKUP_DIR}\\ModInfo.xml.orig') { Copy-Item '${CLIENT_BACKUP_DIR}\\ModInfo.xml.orig' '${CLIENT_VTT_DIR}\\ModInfo.xml' -Force }; if (Test-Path '${CLIENT_VTT_DIR}\\EnableTestHarness.txt') { Remove-Item '${CLIENT_VTT_DIR}\\EnableTestHarness.txt' -Force }" \
         || log "warn: failed to restore client-side VisitedTraderTeleport (continuing)"
 
     # Config/ is deployed alongside the DLL by 03-deploy-mods.sh, so it has to be put back
@@ -58,6 +62,12 @@ if [ -n "${CLIENT_MODS_DIR:-}" ] && [ -n "${VTT_CLIENT_MOD_DIRNAME:-}" ] && [ -n
     log "restoring client-side VisitedTraderTeleport Config/ from backup..."
     run_on_omen_cmd "if (Test-Path '${CLIENT_BACKUP_DIR}\\Config.orig') { Remove-Item '${CLIENT_VTT_DIR}\\Config' -Recurse -Force -ErrorAction SilentlyContinue; Copy-Item '${CLIENT_BACKUP_DIR}\\Config.orig' '${CLIENT_VTT_DIR}\\Config' -Recurse -Force }" \
         || log "warn: failed to restore client-side Config/ (continuing)"
+
+    # A backup is good for the run that took it. Left in place, the next teardown of a run
+    # that failed before its own backup would put these files into whatever profile that
+    # run used.
+    run_on_omen_cmd "foreach (\$name in 'VisitedTraderTeleport.dll.orig', 'ModInfo.xml.orig', 'Config.orig') { \$used = Join-Path '${CLIENT_BACKUP_DIR}' \$name; if (Test-Path \$used) { Remove-Item \$used -Recurse -Force } }" \
+        || log "warn: failed to clear the used client-side backup (continuing)"
 
     log "removing SdtdTestPilot from the client..."
     run_on_omen_cmd "Remove-Item '${CLIENT_MODS_DIR}\\SdtdTestPilot' -Recurse -Force -ErrorAction SilentlyContinue" \
@@ -98,10 +108,18 @@ if [ -n "${SERVER_MODS_DIR:-}" ]; then
     fi
 
     if [ -d "$SERVER_BACKUP_DIR" ]; then
+        # The whole directory, not just the DLL: the deploy also replaces ModInfo.xml and
+        # Config/, and the travel cost scenario edits Config/VisitedTraderTeleport.xml. Putting
+        # back only the DLL left the server charging casino coins after every release run.
         log "restoring server-side VisitedTraderTeleport from backup..."
-        cp -f "$SERVER_BACKUP_DIR/VisitedTraderTeleport.dll" "$SERVER_VTT_DIR/VisitedTraderTeleport.dll" \
-            || log "warn: failed to restore server-side VisitedTraderTeleport.dll (continuing)"
-        rm -f "$SERVER_VTT_DIR/EnableTestHarness.txt"
+        # The backup is then dropped for the same reason as the client's: a later run that
+        # fails before taking its own would otherwise restore this one.
+        if rm -rf "$SERVER_VTT_DIR" && cp -a "$SERVER_BACKUP_DIR" "$SERVER_VTT_DIR"; then
+            rm -f "$SERVER_VTT_DIR/EnableTestHarness.txt"
+            rm -rf "$SERVER_BACKUP_DIR"
+        else
+            log "warn: failed to restore server-side VisitedTraderTeleport - the backup is kept at $SERVER_BACKUP_DIR (continuing)"
+        fi
     else
         log "warn: no server-side backup found at $SERVER_BACKUP_DIR, leaving server mod as-is"
     fi

@@ -1114,3 +1114,36 @@ not: the client connects, the CRC does not care, and the ids come from the serve
 The general form, which this pipeline keeps re-learning: when a design debate depends on
 how the platform behaves, the cheapest move is to make the platform show you. The rig to
 do it is usually smaller than the argument, and it becomes the regression test afterwards.
+
+## A backup shared by every profile restores the wrong install
+
+The first run against a fresh `3.4_Vanilla` profile stopped at the client backup:
+`03-deploy-mods.sh` copied `Mods\VisitedTraderTeleport\VisitedTraderTeleport.dll`
+unconditionally, and that profile had no mod installed. Teardown then did worse than fail.
+`OMEN_SCRATCH_DIR\mod-backup` is one folder for every profile, and it still held the
+`3.0Vanilla` files from a run weeks earlier, so "restoring from backup" created a
+`VisitedTraderTeleport\Config` in the 3.4 profile that had never been there.
+
+Now the backup step clears what an earlier run left before it takes its own, records
+`NOT_INSTALLED` when the client has no mod folder, and teardown removes the folder in
+that case instead of restoring into it. Teardown also deletes the backup once it has
+used it, so a later run that fails before its own backup has nothing stale to restore.
+
+The general point: a backup is only valid for the run that took it, and "restore" is only
+safe when it knows what it is restoring over. A shared scratch location turns a
+leftover into someone else's data.
+
+The second run then failed copying the DLL into a folder that did not exist, which exposed
+the rest of the same assumption: only the DLL and `Config/` were ever deployed, so the
+mod's `ModInfo.xml` was always whatever the install already had. On a fresh client that
+is nothing, and the game skips a mod folder without one. On the server it meant the log
+said `Loaded Mod: VisitedTraderTeleport (0.7.9)` while 0.8.1 was under test. The deploy
+now creates the folder and ships the `ModInfo.xml` that belongs to the build or package,
+and the client backs it up and restores it like the DLL.
+
+The server side had the mirror image of this. `03-deploy-mods.sh` backed up the whole mod
+folder, but teardown copied back only the DLL. Whatever else the run changed stayed: the
+release run's travel cost scenario leaves `TravelCost enabled="true" item="casinoCoin"` in
+`Config/VisitedTraderTeleport.xml`, so the server went on charging casino coins for every
+trip after the run "restored" it, and `ModInfo.xml` stayed at the tested version over the
+old DLL. Teardown now puts back the whole folder and then drops the backup.

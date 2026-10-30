@@ -89,6 +89,10 @@ log "VisitedTraderTeleport.debug.dll -> $OUTPUT_DIR"
 log "collecting VisitedTraderTeleport Config/ from the build tree..."
 copy_dir_from_omen "${WORK_REMOTE_VTT}\\mod\\VisitedTraderTeleport\\Config" "$OUTPUT_DIR/mod-config"
 log "mod-config/ -> $OUTPUT_DIR"
+# ModInfo.xml as well: a client with no VisitedTraderTeleport installed has none, and the
+# game does not load a mod folder without one.
+copy_from_omen "${WORK_REMOTE_VTT}\\mod\\VisitedTraderTeleport\\ModInfo.xml" \
+    "$OUTPUT_DIR/VisitedTraderTeleport.ModInfo.xml"
 
 # --- 2. SdtdTestPilot (Debug, matching GameFlavor) ---
 log "archiving SdtdTestPilot (this repo)..."
