@@ -16,7 +16,9 @@ refs/*
 !refs/README.md
 
 # Environment-specific profile config (real values; commit only *.env.example)
+# Copies kept by hand (v3.env.bak-1006 and the like) hold the same real values.
 config/*.env
+config/*.env.*
 !config/*.env.example
 
 # Runtime artifacts from test runs (logs, command-queue captures, etc.)
