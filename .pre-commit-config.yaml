@@ -9,3 +9,15 @@ repos:
     rev: v8.21.2
     hooks:
       - id: gitleaks
+
+  # Real profiles and hand-made copies of them (v3.env, v3.env.bak-1006, ...) hold
+  # environment-specific values. .gitignore keeps them out of `git add -A`, but a pattern it
+  # misses lets one through, as #34 did. This refuses them at commit time whatever the
+  # .gitignore says; only *.env.example belongs in the repo.
+  - repo: local
+    hooks:
+      - id: no-real-profile
+        name: Refuse real profile files and copies of them
+        language: fail
+        entry: "real profile values must not be committed; only config/*.env.example is tracked"
+        files: '(^|/)[^/]*\.env(?!\.example$)([.-][^/]*)?$|\.(bak|orig|old)([.-][^/]*)?$'
