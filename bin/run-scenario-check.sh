@@ -40,7 +40,11 @@ Usage: $0 --scenario <companion|distance|paging|cost> --profile <v3|v26> [--mode
                          distance  - travels a real distance, so the destination has to be
                                      prepared first; checks that preparation ran and the
                                      arrival stabilized. TRAVEL_DISTANCE=<metres> to change
-                                     how far (default 1000).
+                                     how far (default 1000). START_TRADER_AT=
+                                     npcTraderJen@190,-144 travels back to the
+                                     world's own trader inside its POI (Navezgane,
+                                     so --mode hostload) and checks the arrival is
+                                     on its floor, not its roof.
                          paging    - records seven traders so the destination list needs two
                                      pages, and walks them.
                          cost      - switches the travel cost on and checks that a trip is

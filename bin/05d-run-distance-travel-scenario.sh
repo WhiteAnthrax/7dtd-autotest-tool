@@ -26,6 +26,9 @@
 #
 # Usage: 05d-run-distance-travel-scenario.sh <profile>
 #   TRAVEL_DISTANCE   metres to move away before travelling back (default 1000)
+#   START_TRADER_AT   <entity name>@<x>,<z>: use the world's own trader there as the
+#                     destination instead of spawning one in the open, so the arrival is
+#                     inside a POI with a roof over it (Navezgane: npcTraderJen@190,-144)
 set -euo pipefail
 
 BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -57,6 +60,30 @@ require_var OMEN_SCRATCH_DIR
 DISTANCE="${TRAVEL_DISTANCE:-1000}"
 TRADER_A_PREFAB="npcTraderHugh"
 TRADER_B_PREFAB="npcTraderJen"
+# START_TRADER=<entity name>@<x>,<z> makes the destination one of the world's own traders,
+# inside its POI, instead of one spawned in the open. A roof over the destination is what
+# an arrival in V3.4 can be pushed onto, and an open-air trader has none. For Navezgane
+# (the hostload world): npcTraderJen@190,-144 - the trader_jen decoration in its prefabs.xml.
+START_TRADER=""
+START_TRADER_X=""
+START_TRADER_Z=""
+START_TRADER_RADIUS=80
+START_TRADER_SPEC="${START_TRADER_AT:-}"
+if [ -n "$START_TRADER_SPEC" ]; then
+    [[ "$START_TRADER_SPEC" =~ ^([A-Za-z0-9_]+)@(-?[0-9]+),(-?[0-9]+)$ ]] \
+        || die "START_TRADER_AT must look like npcTraderJen@190,-144, not '$START_TRADER_SPEC'"
+    START_TRADER="${BASH_REMATCH[1]}"
+    START_TRADER_X="${BASH_REMATCH[2]}"
+    START_TRADER_Z="${BASH_REMATCH[3]}"
+    TRADER_A_PREFAB="$START_TRADER"
+    # Trader B is spawned and talked to; keep it a different trader from A so the two
+    # records can never be mistaken for one another.
+    [ "$TRADER_B_PREFAB" != "$TRADER_A_PREFAB" ] || TRADER_B_PREFAB="npcTraderHugh"
+fi
+# How far the arrival may be above or below the recorded trader. The mod aims for the
+# trader's own floor height, so anything more is the player standing somewhere else - on a
+# roof, typically, which is a few metres up.
+ARRIVAL_HEIGHT_TOLERANCE_METRES=1.5
 TRAVEL_RESPONSE_ID="vtt_open"
 CONFIRM_YES_ID="vtt_confirm_yes"
 # Long trips take longer than the 0m ones: the destination has to load and the arrival is
@@ -142,6 +169,20 @@ distance_2d() {
 # traders, and picking one of those would give a valid id for the wrong entity.
 spawn_and_find() { world_spawn_entity "$1" "$2"; }
 
+# trader_nearest <entity name> <x> <z>: the 'le' line of the entity with that name closest to
+# (x, z), if one is within START_TRADER_RADIUS. Empty while its chunk has not loaded.
+trader_nearest() {
+    local name="$1" x="$2" z="$3"
+    world_le | grep -P "name=${name}, id=[0-9]+" | while IFS= read -r line; do
+        local pos ex ez
+        pos="$(printf '%s' "$line" | grep -oP 'pos=\(\K[^)]+' || true)"
+        [ -n "$pos" ] || continue
+        ex="$(printf '%s' "$pos" | awk -F', ' '{ print $1 }')"
+        ez="$(printf '%s' "$pos" | awk -F', ' '{ print $3 }')"
+        printf '%s\t%s\n' "$(distance_2d "$ex" "$ez" "$x" "$z")" "$line"
+    done | sort -n | awk -F'\t' -v r="$START_TRADER_RADIUS" '$1 <= r { print $2; exit }'
+}
+
 # Counts one of the mod's own log markers. Which log that is depends on the topology, so this
 # goes through world_log_grep_count; the window is a before/after difference because the
 # hostload side can only count the whole file.
@@ -165,9 +206,65 @@ START_X="$(pos_field "$PLAYER_START" 0)"
 START_Y="$(pos_field "$PLAYER_START" 1)"
 START_Z="$(pos_field "$PLAYER_START" 2)"
 
-log "spawning ${TRADER_A_PREFAB} (the destination) at the player's position"
-TRADER_A_ID="$(spawn_and_find "$TRADER_A_PREFAB" "spawnentityat ${TRADER_A_PREFAB} ${START_X} ${START_Y} ${START_Z}")" \
-    || die "could not spawn ${TRADER_A_PREFAB}"
+if [ -n "$START_TRADER" ]; then
+    # The destination is the world's own trader, standing on the floor of its POI. This first
+    # teleport only brings the POI into range so the trader appears; where it lands (roof or
+    # ground) does not matter, because the player is moved inside before recording.
+    log "teleporting the player to ${START_TRADER} at (${START_TRADER_X}, ${START_TRADER_Z})"
+    REPLY="$(world_console "teleportplayer ${PLAYER_ID} ${START_TRADER_X} -1 ${START_TRADER_Z}" "" 15 | tr -d '\r' | grep -v '^\s*$' | tail -3 || true)"
+    if printf '%s' "$REPLY" | grep -qiE "not a valid|usage:|unknown command|error"; then
+        die "the console refused the teleport to ${START_TRADER}: ${REPLY}"
+    fi
+    TRADER_A_ID=""
+    TRADER_A_LINE=""
+    for attempt in $(seq 1 30); do
+        sleep 4
+        TRADER_A_LINE="$(trader_nearest "$START_TRADER" "$START_TRADER_X" "$START_TRADER_Z")"
+        if [ -n "$TRADER_A_LINE" ]; then
+            TRADER_A_ID="$(printf '%s' "$TRADER_A_LINE" | grep -oP "name=${START_TRADER}, id=\K[0-9]+")"
+            break
+        fi
+        [ $((attempt % 5)) -eq 0 ] && log "  ${START_TRADER} has not appeared yet"
+    done
+    [ -n "$TRADER_A_ID" ] \
+        || die "no ${START_TRADER} appeared within ${START_TRADER_RADIUS}m of (${START_TRADER_X}, ${START_TRADER_Z})"
+    TRADER_A_POS="$(printf '%s' "$TRADER_A_LINE" | grep -oP 'pos=\(\K[^)]+')"
+    log "${START_TRADER} (id ${TRADER_A_ID}) stands at (${TRADER_A_POS})"
+
+    # The mod records a visit at the *player's* position, not the trader's, so the player has
+    # to be inside, on the trader's floor, when the dialog opens - as a real player is. The
+    # first version recorded from where the teleport above had left them, outside the POI,
+    # and the trip back then went outside too: nothing under a roof was ever tested.
+    #
+    # teleportplayer takes whole numbers; the trader's own spot, truncated, is inside the
+    # counter area and on its floor.
+    INSIDE_X="$(printf '%s' "$TRADER_A_POS" | awk -F', ' '{ printf "%d", $1 }')"
+    INSIDE_Y="$(printf '%s' "$TRADER_A_POS" | awk -F', ' '{ printf "%d", $2 + 0.5 }')"
+    INSIDE_Z="$(printf '%s' "$TRADER_A_POS" | awk -F', ' '{ printf "%d", $3 }')"
+    log "placing the player inside, at (${INSIDE_X}, ${INSIDE_Y}, ${INSIDE_Z})"
+    REPLY="$(world_console "teleportplayer ${PLAYER_ID} ${INSIDE_X} ${INSIDE_Y} ${INSIDE_Z}" "" 15 | tr -d '\r' | grep -v '^\s*$' | tail -3 || true)"
+    if printf '%s' "$REPLY" | grep -qiE "not a valid|usage:|unknown command|error"; then
+        die "the console refused the teleport inside ${START_TRADER}'s POI: ${REPLY}"
+    fi
+    sleep 8
+    PLAYER_INSIDE="$(player_state)"
+    log "player inside: $(printf '%s' "$PLAYER_INSIDE" | jq -c .)"
+    START_X="$(pos_field "$PLAYER_INSIDE" 0)"
+    START_Y="$(pos_field "$PLAYER_INSIDE" 1)"
+    START_Z="$(pos_field "$PLAYER_INSIDE" 2)"
+    TRADER_A_Y="$(printf '%s' "$TRADER_A_POS" | awk -F', ' '{ print $2 }')"
+    # Only "inside, near the trader's level" is being checked here; the arrival is judged
+    # against wherever the player was recorded. Steps inside a POI put the player up to a
+    # couple of metres from the trader's own height, so this is looser than the arrival check.
+    if ! awk -v a="$START_Y" -v b="$TRADER_A_Y" -v t=3 \
+            'BEGIN { d = a - b; if (d < 0) d = -d; exit !(d <= t) }'; then
+        die "could not put the player on ${START_TRADER}'s floor: player y=${START_Y}, trader y=${TRADER_A_Y}"
+    fi
+else
+    log "spawning ${TRADER_A_PREFAB} (the destination) at the player's position"
+    TRADER_A_ID="$(spawn_and_find "$TRADER_A_PREFAB" "spawnentityat ${TRADER_A_PREFAB} ${START_X} ${START_Y} ${START_Z}")" \
+        || die "could not spawn ${TRADER_A_PREFAB}"
+fi
 log "recording it by opening its dialog"
 tp_dialog open "$TRADER_A_ID" >/dev/null
 tp_dialog close >/dev/null
@@ -294,10 +391,14 @@ take_screenshot "04-after-long-trip"
 PLAYER_END="$(player_state)"
 log "player after travel: $(printf '%s' "$PLAYER_END" | jq -c .)"
 END_X="$(pos_field "$PLAYER_END" 0)"
+END_Y="$(pos_field "$PLAYER_END" 1)"
 END_Z="$(pos_field "$PLAYER_END" 2)"
 TRAVELLED="$(distance_2d "$AWAY_X" "$AWAY_Z" "$END_X" "$END_Z")"
 ARRIVAL_OFFSET="$(distance_2d "$END_X" "$END_Z" "$START_X" "$START_Z")"
-log "moved ${TRAVELLED}m, ending ${ARRIVAL_OFFSET}m from where ${TRADER_A_PREFAB} was recorded"
+# Signed: positive is above the trader. The 2D offset alone cannot tell the trader's floor
+# from the roof right over it.
+ARRIVAL_HEIGHT="$(awk -v a="$END_Y" -v b="$START_Y" 'BEGIN { printf "%.2f", a - b }')"
+log "moved ${TRAVELLED}m, ending ${ARRIVAL_OFFSET}m from where ${TRADER_A_PREFAB} was recorded, ${ARRIVAL_HEIGHT}m above it"
 
 PREP_STARTED="$(( $(marker_count 'Preparing destination') - PREP_STARTED_BEFORE ))"
 PREP_READY="$(( $(marker_count 'Destination ready after preparation') - PREP_READY_BEFORE ))"
@@ -330,6 +431,9 @@ jq -n \
     --argjson arrival_offset "$ARRIVAL_OFFSET" \
     --argjson travel_seconds "$TRAVEL_SECONDS" \
     --argjson arrival_tolerance "$ARRIVAL_TOLERANCE_METRES" \
+    --argjson arrival_height "$ARRIVAL_HEIGHT" \
+    --argjson arrival_height_tolerance "$ARRIVAL_HEIGHT_TOLERANCE_METRES" \
+    --arg start_trader "$START_TRADER" \
     --argjson preparation_started "$PREP_STARTED" \
     --argjson preparation_ready "$PREP_READY" \
     --argjson preparation_failed "$PREP_FAILED" \
@@ -347,6 +451,9 @@ jq -n \
       travelled: $travelled,
       arrival_offset: $arrival_offset,
       arrival_tolerance: $arrival_tolerance,
+      arrival_height: $arrival_height,
+      arrival_height_tolerance: $arrival_height_tolerance,
+      start_trader: (if $start_trader == "" then null else $start_trader end),
       travel_seconds: $travel_seconds,
       destination: {id: $destination_id, text: $destination_text},
       confirmation: $confirmation,

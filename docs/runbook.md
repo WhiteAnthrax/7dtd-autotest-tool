@@ -427,6 +427,22 @@ destination` / `Destination ready after preparation` actually run and are assert
 with no queue expiry, no `Destination was not ready`, and a player who is still alive at the
 far end.
 
+A trader spawned in the open cannot show where the player lands relative to a building.
+`START_TRADER_AT=<entity>@<x>,<z>` records a trader that is already part of the world
+instead - one in an indoor trader POI - and the run also checks that the player arrives at
+the height that was recorded, within `ARRIVAL_HEIGHT_TOLERANCE_METRES` (1.5m):
+
+```bash
+START_TRADER_AT='npcTraderJen@190,-144' ./bin/run-scenario-check.sh --scenario distance --profile v34 --mode hostload
+```
+
+`<x>,<z>` only has to be near the trader (within 80m); the run looks the trader up and moves
+the player inside to it before recording. The mod records the *player's* position as the
+destination, not the trader's, so recording from outside the building would make the
+outside the destination. `--mode hostload` matters for this one: the host's own trip takes a
+different path through the game than a remote client's - see "A respawn that outlasts the
+arrival hold" in `lessons-learned.md`.
+
 **cost** switches `<TravelCost>` on in the *installed* config (03c, which has to run before
 the client starts - the mod reads that file at world load and there is no reload) and then
 travels twice: once with nothing to pay with, which must be refused without taking anything,
@@ -608,6 +624,23 @@ denied entry outright, and the connect-time CRC does not cover mod files at all.
 Both sides log `Registered ... as net package id` at startup. Those are the mod registering
 itself and are **overwritten at connect** by the server's table, so a difference there means
 nothing on its own.
+
+### Testing alongside another mod
+
+To reproduce a conflict a player reported, `EXTRA_CLIENT_MOD_DIRS` installs other mods on
+the client next to the one under test (local mod folders, separated by `:`):
+
+```bash
+EXTRA_CLIENT_MOD_DIRS=<dir>/SphereII_Legacy_Distant_Terrain \
+    ./bin/run-scenario-check.sh --scenario distance --profile v34 --mode hostload
+```
+
+Each folder is copied to `Mods\<its name>`, and the name may only contain letters, digits,
+`.`, `_` and `-`. If a folder of that name is already on the client, the run stops instead of
+overwriting it. Teardown removes only what the run installed: the names are listed in
+`extra-client-mods.txt` under `OMEN_SCRATCH_DIR`, so this works even when teardown runs
+without the variable. Get the other mod from its author's own release, and keep it out of
+this repository.
 
 ### Testing a branch
 

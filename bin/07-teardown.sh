@@ -72,6 +72,15 @@ if [ -n "${CLIENT_MODS_DIR:-}" ] && [ -n "${VTT_CLIENT_MOD_DIRNAME:-}" ] && [ -n
     log "removing SdtdTestPilot from the client..."
     run_on_omen_cmd "Remove-Item '${CLIENT_MODS_DIR}\\SdtdTestPilot' -Recurse -Force -ErrorAction SilentlyContinue" \
         || log "warn: failed to remove client-side SdtdTestPilot (continuing)"
+
+    # The extra mods 03-deploy-mods.sh installed for EXTRA_CLIENT_MOD_DIRS. Only names on
+    # its list are removed, and it only lists folders it created itself.
+    if [ -n "${OMEN_SCRATCH_DIR:-}" ]; then
+        EXTRA_MODS_LIST="${OMEN_SCRATCH_DIR}\\extra-client-mods.txt"
+        log "removing extra client mods this run installed (if any)..."
+        run_on_omen_cmd "if (Test-Path '${EXTRA_MODS_LIST}') { foreach (\$name in Get-Content '${EXTRA_MODS_LIST}') { if (\$name -match '^[A-Za-z0-9._-]+\$') { \$dir = Join-Path '${CLIENT_MODS_DIR}' \$name; if (Test-Path \$dir) { Remove-Item \$dir -Recurse -Force; Write-Output ('removed extra mod ' + \$name) } } }; Remove-Item '${EXTRA_MODS_LIST}' -Force }" \
+            || log "warn: failed to remove extra client mods (continuing)"
+    fi
 else
     log "warn: client mod dir config not set, skipping client mod restore"
 fi

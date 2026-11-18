@@ -1147,3 +1147,30 @@ release run's travel cost scenario leaves `TravelCost enabled="true" item="casin
 `Config/VisitedTraderTeleport.xml`, so the server went on charging casino coins for every
 trip after the run "restored" it, and `ModInfo.xml` stayed at the tested version over the
 old DLL. Teardown now puts back the whole folder and then drops the backup.
+
+## A respawn that outlasts the arrival hold
+
+A player hosting a V3.4 game reported landing on the trader's roof every time, while their
+friend landed in front of the trader. Every trip passed here.
+
+In V3.4, `EntityPlayer.Teleport` respawns the player, and when that respawn finishes the game
+moves the player to the top of the terrain column (`World.GetHeight + 1`) - the roof of an
+indoor trader. The game first waits until the world around the player is ready. A remote
+client's trip goes through `TeleportToPosition`, which waits for `Spawned` and then puts the
+player back where they were sent. The host's own trip does not. The mod held the floor
+position after the teleport, but stopped once the player had stayed still for 12 frames.
+
+Here the respawn finished in about 0.02s, while the hold was still running, so the hold
+put the player back each time. The reporter's took about 1.5s, after the hold had stopped. They found
+the mod that made it slow: SphereII Legacy Distant Terrain. With it installed here
+(`EXTRA_CLIENT_MOD_DIRS`), the respawn took 2.5s and `main` landed 10.5m up, on the roof.
+The fix (the hold now waits for `Spawned`) landed on the floor.
+
+Two things in the scenario had to change first. The test recorded the trader from outside
+its building, because the mod records the *player's* position, not the trader's. And a
+trader spawned in the open has no roof to land on. `START_TRADER_AT` records a real trader
+from inside its building and checks the arrival height.
+
+The general point: a timing bug only shows up when the timing is like the reporter's, and
+their timing comes from their setup. When a report cannot be reproduced, find out what in
+their setup makes it slow, and put that into the test.
