@@ -33,6 +33,8 @@ jq '{
     separation_before,
     travelled,
     arrival_offset,
+    arrival_height,
+    start_trader,
     travel_seconds,
     confirmation,
     markers,
@@ -58,6 +60,10 @@ jq '{
 
     travelled_the_distance: (.travelled >= (.requested_distance * 0.8)),
     arrived_at_the_destination: (.arrival_offset <= .arrival_tolerance),
+    # On the floor the trader stands on, not on the roof above it. A result written before this
+    # field existed has no height, and is not failed for that.
+    arrived_at_floor_height: (if .arrival_height == null then true
+                              else ((.arrival_height | fabs) <= .arrival_height_tolerance) end),
     teleport_reported: (.markers.teleported == 1),
     no_teleport_failure: (.markers.teleport_failed == 0),
     screenshots: (.screenshots | length),
@@ -65,13 +71,15 @@ jq '{
 }
 | .ok = (.player_alive and .was_a_long_trip and .preparation_ran and .preparation_completed
          and .preparation_did_not_fail and .no_queue_problems
-         and .travelled_the_distance and .arrived_at_the_destination and .teleport_reported
+         and .travelled_the_distance and .arrived_at_the_destination and .arrived_at_floor_height
+         and .teleport_reported
          and .no_teleport_failure)' \
     "$RESULT_FILE" > "$VERDICT_FILE"
 
 jq -r '
     "distance travel verdict (" + .mode + "):",
-    "  trip:        \(.separation_before)m away, moved \(.travelled)m, ended \(.arrival_offset)m from the destination",
+    "  trip:        \(.separation_before)m away, moved \(.travelled)m, ended \(.arrival_offset)m from the destination, \(.arrival_height)m above it",
+    "  destination: " + (.start_trader // "a trader spawned in the open"),
     "  took:        \(.travel_seconds)s",
     "  preparation: started=\(.markers.preparation_started) ready=\(.markers.preparation_ready) not_ready=\(.markers.preparation_failed)",
     "  transport:   started=\(.markers.transport_started) problems=\(.markers.queue_problems) teleported=\(.markers.teleported) failed=\(.markers.teleport_failed)",

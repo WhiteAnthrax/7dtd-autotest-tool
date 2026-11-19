@@ -224,4 +224,28 @@ copy_to_omen "$OUTPUT_DIR/SdtdTestPilot.debug.dll" "${CLIENT_TESTPILOT_DIR}\\Sdt
 copy_to_omen "$OUTPUT_DIR/SdtdTestPilot.ModInfo.xml" "${CLIENT_TESTPILOT_DIR}\\ModInfo.xml"
 run_on_omen_cmd "New-Item -ItemType File -Force -Path '${CLIENT_TESTPILOT_DIR}\\EnableTestPilot.txt' | Out-Null"
 
+# EXTRA_CLIENT_MOD_DIRS installs other mods next to the one under test on the client, to
+# reproduce a conflict a player reported (one local mod folder per entry, separated by ':').
+# Each folder goes to Mods\<its basename>. A folder of that name already on the client is a
+# refusal, not an overwrite: teardown deletes what this run installed, and must never delete
+# something that was there before. The names installed are written to a list on the client,
+# so 07-teardown.sh removes them even when it runs without this variable set.
+EXTRA_CLIENT_MOD_DIRS="${EXTRA_CLIENT_MOD_DIRS:-}"
+EXTRA_MODS_LIST="${OMEN_SCRATCH_DIR}\\extra-client-mods.txt"
+if [ -n "$EXTRA_CLIENT_MOD_DIRS" ]; then
+    IFS=':' read -r -a extra_dirs <<< "$EXTRA_CLIENT_MOD_DIRS"
+    for extra_dir in "${extra_dirs[@]}"; do
+        [ -f "$extra_dir/ModInfo.xml" ] || die "EXTRA_CLIENT_MOD_DIRS entry has no ModInfo.xml: $extra_dir"
+        extra_name="$(basename "$extra_dir")"
+        case "$extra_name" in
+            *[!A-Za-z0-9._-]*) die "extra mod folder name must be letters, digits, '.', '_' or '-': $extra_name" ;;
+        esac
+        extra_remote="${CLIENT_MODS_DIR}\\${extra_name}"
+        log "deploying extra client mod ${extra_name}..."
+        run_on_omen_cmd "if (Test-Path '${extra_remote}') { Write-Output 'ALREADY_PRESENT'; exit 1 }; New-Item -ItemType Directory -Force -Path '${OMEN_SCRATCH_DIR}' | Out-Null; New-Item -ItemType Directory -Force -Path '${extra_remote}' | Out-Null; Add-Content -Path '${EXTRA_MODS_LIST}' -Value '${extra_name}'" \
+            || die "Mods\\${extra_name} already exists on the client; refusing to overwrite it"
+        copy_dir_to_omen "$extra_dir" "$extra_remote"
+    done
+fi
+
 log "mods deployed"
