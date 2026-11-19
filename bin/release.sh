@@ -47,8 +47,9 @@ Usage: $0 --line <v3|v26> [--version <x.y.z>] [--languages a,b,c]
   --version <x.y.z>  Override the version. By default it is read from the mod's ModInfo.xml
                      at the commit being released, which is what names the ZIP anyway.
   --languages a,b,c  Passed to the release gate (default: whatever it defaults to).
-  --skip-verify      Only if the gate has already passed for this exact ZIP; it is still
-                     checked, and refused when the hash does not match.
+  --skip-verify      Publish the ZIP already in output/<profile>/dist without rebuilding it,
+                     only if the gate has already passed for those exact bytes and they were
+                     built from the commit being released; both are checked.
   --dry-run          Do everything up to and including the build and the gate, then print
                      what would be published and stop.
   --yes              Do not ask before publishing.
@@ -161,9 +162,13 @@ PACKAGE="$ROOT_DIR/output/$PROFILE/dist/VisitedTraderTeleport-${VERSION}.zip"
 # A rehearsal must not replace the package a real run built and verified. Two builds of the
 # same commit are not byte-identical (the compiler stamps each one), so rebuilding here would
 # leave a ZIP on disk that no longer matches the verification - and looks exactly like the one
-# that does.
+# that does. --skip-verify keeps it for the same reason: it means "publish the ZIP the gate
+# already passed", and a rebuild would never match that gate's hash.
 if [ "$DRY_RUN" = "1" ] && [ -f "$PACKAGE" ]; then
     log "dry run: keeping the package already in output/$PROFILE/dist"
+elif [ "$SKIP_VERIFY" = "1" ]; then
+    [ -f "$PACKAGE" ] || die "--skip-verify was given but there is no package at ${PACKAGE} - run without it to build and verify one"
+    log "--skip-verify: keeping the package already in output/$PROFILE/dist"
 else
     log "building the package"
     "$BIN_DIR/build-release-package.sh" --profile "$PROFILE" --ref "$REF" \
@@ -192,6 +197,11 @@ if [ "$DRY_RUN" = "1" ]; then
 elif [ "$SKIP_VERIFY" = "1" ]; then
     verification_matches \
         || die "--skip-verify was given but no passing verification exists for these exact bytes (sha256 ${PACKAGE_SHA:0:12})"
+    # The kept ZIP could be from an earlier commit of the same version; the gate result records
+    # which commit it was built from, so refuse anything but the one being released.
+    VERIFIED_COMMIT="$(jq -r '.built_from.source_commit // ""' "$VERIFY_FILE")"
+    [ "$VERIFIED_COMMIT" = "$LOCAL_COMMIT" ] \
+        || die "--skip-verify: the verified package was built from $(printf '%.12s' "${VERIFIED_COMMIT:-unknown}"), not from ${REF} @ $(printf '%.12s' "$LOCAL_COMMIT") - run without --skip-verify"
     log "skipping the gate: it already passed for sha256 ${PACKAGE_SHA:0:12}"
 else
     log "running the release gate (this takes 20-30 minutes)"

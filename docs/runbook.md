@@ -229,6 +229,12 @@ for `READY_TIMEOUT_SECONDS` and then reporting nothing useful. If you see that e
   point the service at `startserver.sh` instead if you want it to stay put. That is the
   server owner's call, not this tool's, so nothing here changes it for you.
 
+  Each old version has its own branch (`v3.3.0`, `v3.2.0`, `v2.6`, ...; list them with
+  `steamcmd +login anonymous +app_info_print 294420 +quit`). Pinning by `STEAM_BETA=v3.3.0` in
+  the compose project's `.env` works, but **unpinning by emptying it does not**: SteamCMD
+  remembers the installed branch and stays on it. Go back with `STEAM_BETA=public` once, and
+  check `BetaKey` and `buildid` in the server's `appmanifest_294420.acf` (below) afterwards.
+
 Only a *confirmed* mismatch is fatal. If either version can't be read the run logs a
 warning and continues, so this check can't block an otherwise-fine run.
 
@@ -581,8 +587,23 @@ the tag must not already be released.
 byte-identical, and replacing the verified ZIP with an unverified twin is exactly the trap
 this pipeline already fell into once) and skips the gate.
 
-`--skip-verify` publishes without re-running the gate, and only works when a passing
-verification exists **for those exact bytes** - the check is on the sha256, not the filename.
+`--skip-verify` publishes the package already in `output/<profile>/dist` without rebuilding
+it or re-running the gate, and only works when a passing verification exists **for those
+exact bytes** - the check is on the sha256, not the filename - and that verification says the
+package was built from the commit being released. Before it kept the package, a real run
+always rebuilt, so `--skip-verify` could never match and a gate run ahead of time was thrown
+away.
+
+That is the way to release when the gate has to run against a server version other than the
+one it is on now - for example the `v3` profile's 3.3 client while the server has moved to
+3.4. Build once, run the gate for each version with the server pinned to it, then publish:
+
+```bash
+./bin/build-release-package.sh --profile v3 --ref main
+# pin the server to the client's version (see "The server updates itself"), then:
+./bin/run-release-verification.sh --profile v3 --package output/v3/dist/VisitedTraderTeleport-<x.y.z>.zip --fresh-save
+./bin/release.sh --line v3 --skip-verify
+```
 
 Afterwards it runs:
 
