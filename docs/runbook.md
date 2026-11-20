@@ -238,6 +238,48 @@ for `READY_TIMEOUT_SECONDS` and then reporting nothing useful. If you see that e
 Only a *confirmed* mismatch is fatal. If either version can't be read the run logs a
 warning and continues, so this check can't block an otherwise-fine run.
 
+## One server per game version
+
+When a line supports more than one game version, keep a server for each rather than
+re-pinning one back and forth. Re-pinning means a 13GB download each way, an `.env` that
+has to be put back, and the `public` step above that is easy to forget; and a gate run
+against the wrong version is not a failure, it is a result for something else.
+
+| Profile | Client | Server directory | Container | Steam branch |
+|---|---|---|---|---|
+| `v3` | 3.3 (`3.0Vanilla`) | `/zfs/GAME-SERVERS/7dtd-server-v33` | `7dtdserver-v33` | `v3.3.0`, pinned |
+| `v34` | 3.4 (`3.4_Vanilla`) | `/zfs/GAME-SERVERS/7dtd-server` | `7dtdserver` | stable, follows updates |
+| `v26` | 2.6 | `/zfs/GAME-SERVERS/7dtd-server-v26-wasteland` | `7dtdserver-v26-wasteland` | `v2.6`, pinned |
+
+A pinned server is a copy of the stable one with two changes in `docker-compose.yml` -
+`container_name` and the default of `STEAM_BETA` - plus an `.env` saying the same, so a
+start can never move it:
+
+```bash
+SRC=/zfs/GAME-SERVERS/7dtd-server; DST=/zfs/GAME-SERVERS/7dtd-server-v33
+mkdir "$DST"
+cp -a "$SRC"/{docker-compose.yml,.env.example,.dockerignore,.gitignore,scripts} "$DST"/
+rsync -a --exclude /backups/ --exclude /restore-quarantine/ --exclude /logs/ --exclude /log/ \
+    --exclude '/serverfiles/output_log__*' "$SRC"/data/ "$DST"/data/
+cd "$DST"
+sed -i 's/^    container_name: 7dtdserver$/    container_name: 7dtdserver-v33/;
+        s/STEAM_BETA: ${STEAM_BETA:-}/STEAM_BETA: ${STEAM_BETA:-v3.3.0}/' docker-compose.yml
+printf 'GAME_UID=1000\nGAME_GID=1000\nSTEAM_BETA=v3.3.0\nSTEAM_VALIDATE=0\n' > .env
+docker compose run --rm --no-deps -T --entrypoint /bin/bash 7dtdserver \
+    -lc 'cd /data/serverfiles && ./startserver-with-update.sh --update-only'
+grep -iE '"buildid"|BetaKey' data/serverfiles/steamapps/appmanifest_294420.acf
+```
+
+then point the profile's `DOCKER_COMPOSE_DIR` and `DOCKER_CONTAINER_NAME` at it.
+
+**They share the game ports (26900-26902), so only one can run at a time.** The pipeline
+stops its server at teardown, so gates run one after another are fine; a server left
+running by hand makes the next one fail to bind. `docker ps` before starting a gate if in
+doubt.
+
+When the game moves on again - 3.5, say - the stable server goes with it, and keeping 3.4
+under test means making a `7dtd-server-v34` the same way and pointing `v34` at it.
+
 ## When 7 Days to Die gets a new version
 
 A game release touches neither this repository nor the mod, so nothing fails on its own -
