@@ -29,6 +29,10 @@ source "$ROOT_DIR/lib/common.sh"
 source "$ROOT_DIR/lib/ssh-omen.sh"
 # shellcheck source=lib/testpilot-queue.sh
 source "$ROOT_DIR/lib/testpilot-queue.sh"
+# shellcheck source=lib/server-console.sh
+source "$ROOT_DIR/lib/server-console.sh"
+# shellcheck source=lib/world-console.sh
+source "$ROOT_DIR/lib/world-console.sh"
 # shellcheck source=lib/docker-server.sh
 source "$ROOT_DIR/lib/docker-server.sh"
 
@@ -123,18 +127,9 @@ LE_OUTPUT="$(submit_and_check "le" | jq -r '.output')"
 PLAYER_ID="$(printf '%s' "$LE_OUTPUT" | grep -oP 'EntityPlayerLocal.*?id=\K[0-9]+' | head -1 || true)"
 [ -n "$PLAYER_ID" ] || die "could not find the local player's entity id in 'le' output"
 
-log "spawning ${TRADER_PREFABS[*]} next to player id=$PLAYER_ID"
-for prefab in "${TRADER_PREFABS[@]}"; do
-    submit_and_check "se ${PLAYER_ID} ${prefab} 1" >/dev/null
-done
-
-LE_OUTPUT="$(submit_and_check "le" | jq -r '.output')"
-TRADER_IDS=()
-for prefab in "${TRADER_PREFABS[@]}"; do
-    id="$(printf '%s' "$LE_OUTPUT" | grep -oP "name=${prefab}, id=\K[0-9]+" | head -1 || true)"
-    [ -n "$id" ] || die "could not find or spawn ${prefab}"
-    TRADER_IDS+=("$id")
-done
+log "spawning ${TRADER_PREFABS[*]} at player id=$PLAYER_ID"
+mapfile -t TRADER_IDS < <(world_spawn_at_player "${TRADER_PREFABS[@]}")
+[ "${#TRADER_IDS[@]}" -eq "${#TRADER_PREFABS[@]}" ] || die "spawned ${#TRADER_IDS[@]} of ${#TRADER_PREFABS[@]} traders"
 log "trader entity ids: ${TRADER_IDS[*]}"
 
 log "recording a visit for each trader by opening its dialog"

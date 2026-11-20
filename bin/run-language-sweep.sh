@@ -32,6 +32,10 @@ source "$ROOT_DIR/lib/common.sh"
 source "$ROOT_DIR/lib/ssh-omen.sh"
 # shellcheck source=lib/testpilot-queue.sh
 source "$ROOT_DIR/lib/testpilot-queue.sh"
+# shellcheck source=lib/server-console.sh
+source "$ROOT_DIR/lib/server-console.sh"
+# shellcheck source=lib/world-console.sh
+source "$ROOT_DIR/lib/world-console.sh"
 # shellcheck source=lib/client-control.sh
 source "$ROOT_DIR/lib/client-control.sh"
 
@@ -143,7 +147,7 @@ trap cleanup EXIT
 # canonicalizes into the destination that is already recorded there, and nothing in the
 # dialog walkthrough teleports anywhere.
 resolve_trader_id() {
-    local le_output id player_id
+    local le_output id
     le_output="$(submit_and_check "le" | jq -r '.output')"
     id="$(printf '%s' "$le_output" | grep -oP 'name=npcTraderBob, id=\K[0-9]+' | head -1 || true)"
     if [ -n "$id" ]; then
@@ -151,12 +155,8 @@ resolve_trader_id() {
         return 0
     fi
 
-    player_id="$(printf '%s' "$le_output" | grep -oP 'EntityPlayerLocal.*?id=\K[0-9]+' | head -1 || true)"
-    [ -n "$player_id" ] || return 1
-    log "no live npcTraderBob; spawning one next to player id=${player_id}"
-    submit_and_check "se ${player_id} npcTraderBob 1" >/dev/null
-    le_output="$(submit_and_check "le" | jq -r '.output')"
-    id="$(printf '%s' "$le_output" | grep -oP 'name=npcTraderBob, id=\K[0-9]+' | head -1 || true)"
+    log "no live npcTraderBob; spawning one at the player"
+    id="$(world_spawn_at_player npcTraderBob)" || return 1
     [ -n "$id" ] || return 1
     printf '%s' "$id"
 }
