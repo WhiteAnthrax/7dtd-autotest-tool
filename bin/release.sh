@@ -227,7 +227,9 @@ if [ -n "$OTHER_REF" ]; then
         | grep -oP '<Version\s+value="\K[^"]+' | head -1 || true)"
 fi
 HEADER="${RELEASE_HEADER//%OTHER_VERSION%/${OTHER_VERSION:-the other}}"
-DISPLAY_NAME="Travel Between Visited Traders ${VERSION} (for ${GAME_LABEL})"
+# No "for": "(for V3.3 - V3.4)" pushed 0.8.2's name past what Nexus accepts, and the page
+# already used "(V3.3 - V3.4)". publish-to-nexus.sh checks the length before uploading.
+DISPLAY_NAME="Travel Between Visited Traders ${VERSION} (${GAME_LABEL})"
 RELEASE_NOTES="$(printf '%s\n\n%s\n\n%s\n' "$HEADER" "$CHANGELOG_SECTION" "${RELEASE_FOOTER:-}")"
 
 cat <<EOF
