@@ -121,6 +121,39 @@ world_spawn_entity() {
     return 1
 }
 
+# world_spawn_at_player <prefab>...: spawns one of each prefab at the player's position, where
+# the world lives, and prints the new entity ids one per line in the order given.
+#
+# This replaces `se <player> <prefab>` sent through the client queue. In connect mode that runs
+# on the client alone: ConsoleCmdSpawnEntity creates the entity with the client's own
+# EntityFactory.nextEntityID and adds it to the client's world, and the server never hears of
+# it. The id it gets is one the server will hand to an entity of its own sooner or later, and
+# when the server sends that entity the client already has the id - the duplicate spawn is
+# dropped, the server's updates for its entity land on the client-only trader, and a removal
+# of the server's entity removes the trader. Both were seen in the release gate: a trader that
+# vanished between two dialog opens, and one that was no longer recognised as the trader being
+# talked to. spawnentityat on the world's own console gives an entity both sides agree on.
+world_spawn_at_player() {
+    local le player_line pos x y z prefab id
+    le="$(world_le)"
+    player_line="$(printf '%s' "$le" | grep -P '\[type=EntityPlayer(Local)?, name=' | head -1 || true)"
+    pos="$(printf '%s' "$player_line" | grep -oP 'pos=\(\K[^)]+' || true)"
+    if [ -z "$pos" ]; then
+        log "could not read the player's position from 'le'"
+        return 1
+    fi
+    x="$(printf '%s' "$pos" | cut -d, -f1 | tr -d ' ')"
+    y="$(printf '%s' "$pos" | cut -d, -f2 | tr -d ' ')"
+    z="$(printf '%s' "$pos" | cut -d, -f3 | tr -d ' ')"
+    for prefab in "$@"; do
+        if ! id="$(world_spawn_entity "$prefab" "spawnentityat ${prefab} ${x} ${y} ${z}")"; then
+            log "${prefab} did not appear in the entity list after spawning at (${x}, ${y}, ${z})"
+            return 1
+        fi
+        printf '%s\n' "$id"
+    done
+}
+
 # world_log_grep_last <pattern>: the most recent line matching <pattern>, from whichever log
 # the game is writing. Counting tells you something happened; this tells you what it decided.
 world_log_grep_last() {

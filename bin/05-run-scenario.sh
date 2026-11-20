@@ -14,6 +14,10 @@ source "$ROOT_DIR/lib/common.sh"
 source "$ROOT_DIR/lib/ssh-omen.sh"
 # shellcheck source=lib/testpilot-queue.sh
 source "$ROOT_DIR/lib/testpilot-queue.sh"
+# shellcheck source=lib/server-console.sh
+source "$ROOT_DIR/lib/server-console.sh"
+# shellcheck source=lib/world-console.sh
+source "$ROOT_DIR/lib/world-console.sh"
 
 # Surface `set -e` failures instead of exiting silently (see lib/common.sh).
 trace_errors
@@ -43,12 +47,10 @@ PLAYER_ID="$(printf '%s' "$LE1_OUTPUT" | grep -oP 'EntityPlayerLocal.*?id=\K[0-9
 # right where the player already is keeps the whole round trip in a known-safe spot.
 # See docs/lessons-learned.md.
 log "spawning two traders near player id=$PLAYER_ID (npcTraderBob, npcTraderJen)"
-submit_and_check "se ${PLAYER_ID} npcTraderBob 1" >/dev/null
-submit_and_check "se ${PLAYER_ID} npcTraderJen 1" >/dev/null
-
-LE2_OUTPUT="$(submit_and_check "le" | jq -r '.output')"
-BOB_ID="$(printf '%s' "$LE2_OUTPUT" | grep -oP 'name=npcTraderBob, id=\K[0-9]+' | head -1 || true)"
-JEN_ID="$(printf '%s' "$LE2_OUTPUT" | grep -oP 'name=npcTraderJen, id=\K[0-9]+' | head -1 || true)"
+# On the world's own console, not with `se` through the client queue - see world_spawn_at_player.
+mapfile -t SPAWNED_IDS < <(world_spawn_at_player npcTraderBob npcTraderJen)
+BOB_ID="${SPAWNED_IDS[0]:-}"
+JEN_ID="${SPAWNED_IDS[1]:-}"
 [ -n "$BOB_ID" ] || die "could not find or spawn npcTraderBob"
 [ -n "$JEN_ID" ] || die "could not find or spawn npcTraderJen"
 log "using trader entity ids: npcTraderBob=$BOB_ID npcTraderJen=$JEN_ID"

@@ -613,6 +613,18 @@ which produced a confident, plausible, wrong answer:
    only exists on the client. Its id means a different entity on the server, or none
    (`no living entity with that id`). Entities spawned from the *server* console replicate
    to the client with the same id, so the server is the only side worth spawning from.
+
+   The scenarios written before this was learned kept spawning with `se` through the client
+   queue - the release gate's dialog and travel scenarios among them - and they mostly
+   passed, because a client-only trader is good enough to open a dialog with. Until the
+   server handed the same id to an entity of its own: the client drops that spawn as a
+   duplicate (the mod's `DuplicateEntitySpawnGuard` logs it; vanilla throws), applies the
+   server's updates for it to the trader, and deletes the trader when the server removes its
+   entity. The gate failed twice in a row on one build, once with the trader gone between two
+   dialog opens and once with the trader no longer recognised as the one being talked to -
+   both read like mod bugs. The tell was in the periodic stats line: the client counted six
+   entities, the server two. `world_spawn_at_player` in `lib/world-console.sh` is now the
+   one way to put a trader next to the player.
 3. **Built without committing.** `02-build-mods.sh` runs `git archive <branch>`, so
    uncommitted work is silently not built. The symptom was the server answering with an
    older version of a command's usage string - which reads like a deployment problem rather
