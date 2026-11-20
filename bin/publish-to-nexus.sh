@@ -107,6 +107,12 @@ require_cmd jq curl stat dd base64
 
 PACKAGE_NAME="$(basename "$PACKAGE")"
 [ -n "$DISPLAY_NAME" ] || DISPLAY_NAME="$PACKAGE_NAME"
+# Nexus rejects a longer name with a 422 at the version step - after the ZIP has already gone
+# up. It does not say what the limit is; 50 is the longest name the file has carried
+# ("Travel Between Visited Traders 0.8.1 (V3.3 - V3.4)"), and 55 was refused.
+NEXUS_NAME_MAX=50
+[ "${#DISPLAY_NAME}" -le "$NEXUS_NAME_MAX" ] \
+    || die "display name is ${#DISPLAY_NAME} characters, over the ${NEXUS_NAME_MAX} Nexus takes: ${DISPLAY_NAME}"
 
 # --- the gate -------------------------------------------------------------------------
 # Same bytes AND ok:true. The name alone is not enough and this was not theoretical: both
@@ -204,6 +210,11 @@ nexus_api() {
 
 # check_response <combined body+status> <what>: splits the trailing status code off, dies
 # on anything outside 2xx, prints the body.
+#
+# This script runs without `set -e`, and `die` inside "$(...)" only ends the subshell. Every
+# call whose output is captured therefore needs `|| exit 1` after it. Without it a failed
+# version creation carried straight on to posting the changelog, which put 0.8.2's notes on
+# the page with no 0.8.2 file under them.
 check_response() {
     local combined="$1" what="$2"
     local status body
@@ -218,7 +229,7 @@ check_response() {
 log "step 1/7: requesting a multipart upload"
 CREATE_BODY="$(jq -n --arg filename "$PACKAGE_NAME" --arg size "$FILE_SIZE" \
     '{filename: $filename, size_bytes: $size}')"
-CREATE_JSON="$(check_response "$(nexus_api POST /uploads/multipart "$CREATE_BODY")" "creating the multipart upload")"
+CREATE_JSON="$(check_response "$(nexus_api POST /uploads/multipart "$CREATE_BODY")" "creating the multipart upload")" || exit 1
 
 UPLOAD_ID="$(printf '%s' "$CREATE_JSON" | jq -r '.data.id')"
 PART_SIZE="$(printf '%s' "$CREATE_JSON" | jq -r '.data.part_size_bytes')"
@@ -274,7 +285,7 @@ check_response "$(nexus_api POST "/uploads/${UPLOAD_ID}/finalise")" "finalising 
 log "step 5/7: waiting for the upload to become available"
 STATE=""
 for attempt in $(seq 1 60); do
-    STATE_JSON="$(check_response "$(nexus_api GET "/uploads/${UPLOAD_ID}")" "reading the upload state")"
+    STATE_JSON="$(check_response "$(nexus_api GET "/uploads/${UPLOAD_ID}")" "reading the upload state")" || exit 1
     STATE="$(printf '%s' "$STATE_JSON" | jq -r '.data.state')"
     log "  attempt ${attempt}: state = ${STATE}"
     [ "$STATE" = "available" ] && break
@@ -289,7 +300,8 @@ done
 # (/mod-file-versions/{id} is read-only), so saying up front what this replaces is the only
 # handle the API offers.
 if [ "$SUPERSEDE" = "1" ] && [ -z "$PREVIOUS_VERSION_ID" ]; then
-    EXISTING_JSON="$(nexus_api GET "/mod-files/${FILE_ID}/versions" || true)"
+    # sed drops the status line nexus_api appends; jq would read it as a second document.
+    EXISTING_JSON="$(nexus_api GET "/mod-files/${FILE_ID}/versions" | sed '$d' || true)"
     PREVIOUS_VERSION_ID="$(printf '%s' "$EXISTING_JSON" \
         | jq -r '[.data.versions[]? | select((.category // "") | test("old_version|archived") | not)]
                  | first | .id // empty' 2>/dev/null || true)"
@@ -311,7 +323,7 @@ VERSION_BODY="$(jq -n \
     '{upload_id: $upload_id, name: $name, version: $version, file_category: $category,
       archive_existing_file: $archive, update_mod_version: $update_mod_version}
      + (if $previous_version_id == "" then {} else {previous_version_id: $previous_version_id} end)')"
-VERSION_JSON="$(check_response "$(nexus_api POST "/mod-files/${FILE_ID}/versions" "$VERSION_BODY")" "creating the file version")"
+VERSION_JSON="$(check_response "$(nexus_api POST "/mod-files/${FILE_ID}/versions" "$VERSION_BODY")" "creating the file version")" || exit 1
 VERSION_ID="$(printf '%s' "$VERSION_JSON" | jq -r '.data.version.id // "?"')"
 log "file version created: ${VERSION_ID}"
 
